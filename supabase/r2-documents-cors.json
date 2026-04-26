@@ -1,0 +1,32 @@
+{
+  "rules": [
+    {
+      "id": "spryartech-documents-browser-read",
+      "allowed": {
+        "origins": [
+          "https://spryar.tech",
+          "https://www.spryar.tech",
+          "http://localhost:3000",
+          "http://localhost:4173",
+          "http://localhost:5173",
+          "http://127.0.0.1:3000",
+          "http://127.0.0.1:4173",
+          "http://127.0.0.1:5173"
+        ],
+        "methods": ["GET", "HEAD"]
+      },
+      "exposeHeaders": [
+        "Accept-Ranges",
+        "Content-Disposition",
+        "Content-Length",
+        "Content-Range",
+        "Content-Type",
+        "ETag",
+        "Last-Modified",
+        "x-amz-meta-original_name",
+        "x-amz-meta-uploaded_by"
+      ],
+      "maxAgeSeconds": 86400
+    }
+  ]
+}

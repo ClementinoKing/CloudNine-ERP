@@ -11,6 +11,8 @@
     "db:check-drift": "./scripts/check-migration-drift.sh",
     "functions:deploy:r2-avatar": "./scripts/deploy-r2-avatar.sh",
     "functions:deploy:r2-avatar:skip-secrets": "./scripts/deploy-r2-avatar.sh --skip-secrets",
+    "functions:deploy:r2-chat-attachments": "./scripts/deploy-r2-chat-attachments.sh",
+    "functions:deploy:r2-chat-attachments:skip-secrets": "./scripts/deploy-r2-chat-attachments.sh --skip-secrets",
     "functions:deploy:r2-voice-comments": "./scripts/deploy-r2-voice-comments.sh",
     "functions:deploy:r2-voice-comments:skip-secrets": "./scripts/deploy-r2-voice-comments.sh --skip-secrets"
   },
