@@ -1,0 +1,2 @@
+-- Seed data moved into 202603100001_initial_organization_schema.sql
+-- so the initial database can be created without organization-scoped relations.
