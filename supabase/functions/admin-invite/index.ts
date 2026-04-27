@@ -26,7 +26,8 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? D
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? ''
 const RESEND_FROM_EMAIL = Deno.env.get('RESEND_FROM_EMAIL') ?? ''
 const TEMP_PASSWORD = '12345678'
-const FALLBACK_APP_BASE_URL = 'https://contas.cloudninetech.co.za'
+const FALLBACK_APP_BASE_URL = 'https://spryartech.cloudninetech.co.za'
+const BRAND_LOGO_URL = 'https://pub-7d1e5686dccc4c4b82b655d5aed298ae.r2.dev/images/Spryar_Tech.png'
 const INVITE_JOB_TITLES = new Set([
   'Managing Director',
   'HR & Compliance Manager',
@@ -157,7 +158,7 @@ async function sendResendInviteEmail(input: {
             <tr>
               <td class="header">
                 <img
-                  src="https://pub-791bdd6d3ff446a8b7e0c43576b708fb.r2.dev/img/Contas%20Logo.png"
+                  src="${BRAND_LOGO_URL}"
                   alt="Spryar Tech"
                   class="logo"
                 />

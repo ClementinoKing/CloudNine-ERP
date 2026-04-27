@@ -22,7 +22,8 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? D
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? ''
 const RESEND_FROM_EMAIL = Deno.env.get('RESEND_FROM_EMAIL') ?? ''
 const TASK_REMINDER_DISPATCH_TOKEN = Deno.env.get('TASK_REMINDER_DISPATCH_TOKEN') ?? ''
-const APP_BASE_URL = Deno.env.get('APP_BASE_URL') ?? 'https://contas.cloudninetech.co.za'
+const APP_BASE_URL = Deno.env.get('APP_BASE_URL') ?? 'https://spryartech.cloudninetech.co.za'
+const BRAND_LOGO_URL = 'https://pub-7d1e5686dccc4c4b82b655d5aed298ae.r2.dev/images/Spryar_Tech.png'
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -103,7 +104,7 @@ function buildMessage(reminderType: ReminderType, taskTitle: string, taskUrl: st
         <table width="100%" style="max-width:600px;background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;">
           <tr>
             <td style="padding:28px;border-bottom:1px solid #e2e8f0;text-align:center;">
-              <img src="https://pub-791bdd6d3ff446a8b7e0c43576b708fb.r2.dev/img/Contas%20Logo.png" alt="Spryar Tech Logo" style="height:42px;">
+              <img src="${BRAND_LOGO_URL}" alt="Spryar Tech" style="height:42px;">
             </td>
           </tr>
           <tr>

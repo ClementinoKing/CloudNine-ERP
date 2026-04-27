@@ -17,16 +17,17 @@ type NotificationDispatchItem = {
   appUrl?: string
 }
 
+const SPRYAR_SITE_URL = 'https://spryartech.cloudninetech.co.za'
+
 function resolveAppUrl(item: NotificationDispatchItem) {
-  if (typeof window === 'undefined') return ''
   if (item.appUrl) return item.appUrl
   if (item.contextKind === 'chat') {
-    return `${window.location.origin}/dashboard/home?openGroupChat=1`
+    return `${SPRYAR_SITE_URL}/dashboard/home?openGroupChat=1`
   }
   if (item.taskId) {
-    return `${window.location.origin}/dashboard/notifications?openTaskId=${encodeURIComponent(item.taskId)}`
+    return `${SPRYAR_SITE_URL}/dashboard/notifications?openTaskId=${encodeURIComponent(item.taskId)}`
   }
-  return `${window.location.origin}/dashboard/notifications`
+  return `${SPRYAR_SITE_URL}/dashboard/notifications`
 }
 
 export async function dispatchNotificationEmails(items: NotificationDispatchItem[]) {
