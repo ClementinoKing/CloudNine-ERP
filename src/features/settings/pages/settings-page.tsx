@@ -281,8 +281,29 @@ function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 }
 
+async function getAdminFunctionHeaders(preferredToken?: string | null) {
+  if (preferredToken) {
+    return { Authorization: `Bearer ${preferredToken}` }
+  }
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+
+  if (session?.access_token) {
+    return { Authorization: `Bearer ${session.access_token}` }
+  }
+
+  const { data: refreshed, error } = await supabase.auth.refreshSession()
+  if (error || !refreshed.session?.access_token) {
+    return null
+  }
+
+  return { Authorization: `Bearer ${refreshed.session.access_token}` }
+}
+
 export function SettingsPage() {
-  const { currentUser, updateCurrentUser } = useAuth()
+  const { currentUser, session, updateCurrentUser } = useAuth()
   const { currentOrganization } = useOrganization()
 
   const [activeTab, setActiveTab] = useState<SettingsTabKey>('profile')
@@ -487,10 +508,12 @@ export function SettingsPage() {
     if (!isAdmin) return
     if (!currentUser?.id) return
     setLoadingAdminInvitations(true)
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    const authHeaders = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined
+    const authHeaders = await getAdminFunctionHeaders(session?.token)
+    if (!authHeaders) {
+      setInviteMessage('Your session expired. Sign in again and retry.')
+      setLoadingAdminInvitations(false)
+      return
+    }
     const { data, error } = await supabase.functions.invoke('admin-invite', {
       body: { action: 'list' },
       headers: authHeaders,
@@ -548,10 +571,6 @@ export function SettingsPage() {
   const handleInviteMembers = async () => {
     if (!isAdmin) return
     if (!currentUser?.id) return
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    const authHeaders = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined
     const emails = splitEmails(inviteEmailInput)
     if (emails.length === 0) {
       setInviteMessage('Enter at least one email address.')
@@ -572,6 +591,12 @@ export function SettingsPage() {
     }
     if (!inviteDepartment.trim()) {
       setInviteMessage('Department is required.')
+      return
+    }
+
+    const authHeaders = await getAdminFunctionHeaders(session?.token)
+    if (!authHeaders) {
+      setInviteMessage('Your session expired. Sign in again and retry.')
       return
     }
 
@@ -612,10 +637,11 @@ export function SettingsPage() {
   const handleResendInvite = async (invitationId: string) => {
     if (!isAdmin) return
     if (!currentUser?.id) return
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    const authHeaders = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined
+    const authHeaders = await getAdminFunctionHeaders(session?.token)
+    if (!authHeaders) {
+      setInviteMessage('Your session expired. Sign in again and retry.')
+      return
+    }
     const { data, error } = await supabase.functions.invoke('admin-invite', {
       body: { action: 'resend', invitationId },
       headers: authHeaders,
@@ -631,10 +657,11 @@ export function SettingsPage() {
   const handleRevokeInvite = async (invitationId: string) => {
     if (!isAdmin) return
     if (!currentUser?.id) return
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    const authHeaders = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : undefined
+    const authHeaders = await getAdminFunctionHeaders(session?.token)
+    if (!authHeaders) {
+      setInviteMessage('Your session expired. Sign in again and retry.')
+      return
+    }
     const { data, error } = await supabase.functions.invoke('admin-invite', {
       body: { action: 'revoke', invitationId },
       headers: authHeaders,

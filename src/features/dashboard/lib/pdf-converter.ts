@@ -1,5 +1,6 @@
 import { resolveR2ObjectUrl } from '@/lib/r2'
 import type { PDFPageProxy } from 'pdfjs-dist'
+import { ensurePdfJsWorkerPort } from './pdfjs-worker'
 
 export type PdfConversionTarget = 'excel' | 'csv' | 'word' | 'powerpoint'
 export type PdfConversionEngine = 'server' | 'local-text' | 'local-ocr' | 'legacy'
@@ -384,8 +385,8 @@ async function extractPdfPages(source: SelectedPdfSource, onProgress?: (progress
     name: source.kind === 'drive' ? source.document.name : source.file.name,
   })
   const data = await loadPdfBytes(source)
-  const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist/legacy/build/pdf.mjs')
-  GlobalWorkerOptions.workerSrc = `${import.meta.env.BASE_URL}pdfjs/pdf.worker.mjs`
+  await ensurePdfJsWorkerPort()
+  const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs')
   onProgress?.({ percent: 5, label: 'Loading PDF' })
   const loadingTask = getDocument({
     data,
