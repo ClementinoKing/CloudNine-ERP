@@ -6,6 +6,8 @@ const REALTIME_TABLES = [
   'tasks',
   'projects',
   'notifications',
+  'chat_messages',
+  'chat_room_members',
   'task_assignees',
   'task_comments',
   'status',

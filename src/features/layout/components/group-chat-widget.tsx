@@ -1114,6 +1114,7 @@ export function GroupChatWidget() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
+  const [unreadMessageCount, setUnreadMessageCount] = useState(0)
   const [isRecordingVoice, setIsRecordingVoice] = useState(false)
   const [recordingElapsedMs, setRecordingElapsedMs] = useState(0)
   const [recordingLevels, setRecordingLevels] = useState<number[]>(() => createBaseWaveLevels(20))
@@ -1193,6 +1194,91 @@ export function GroupChatWidget() {
       .filter((option) => option.name.toLowerCase().includes(query) || option.username.includes(query))
       .slice(0, 6)
   }, [mentionDraft, mentionOptions])
+
+  useEffect(() => {
+    if (!currentUser?.id) {
+      setUnreadMessageCount(0)
+      return
+    }
+
+    let cancelled = false
+
+    const loadUnreadMessageCount = async () => {
+      const roomResult = await supabase.from('chat_rooms').select('id').eq('slug', GENERAL_CHAT_ROOM_SLUG).maybeSingle()
+
+      if (cancelled) return
+
+      if (roomResult.error || !roomResult.data) {
+        if (roomResult.error) {
+          console.error('Failed to load unread group chat room', roomResult.error)
+        }
+        setUnreadMessageCount(0)
+        return
+      }
+
+      const roomId = roomResult.data.id
+      const membershipResult = await supabase
+        .from('chat_room_members')
+        .select('last_read_at')
+        .eq('room_id', roomId)
+        .eq('user_id', currentUser.id)
+        .maybeSingle()
+
+      if (cancelled) return
+
+      if (membershipResult.error) {
+        console.error('Failed to load unread group chat membership', membershipResult.error)
+        return
+      }
+
+      if (!membershipResult.data) {
+        setUnreadMessageCount(0)
+        return
+      }
+
+      const lastReadAt = membershipResult.data.last_read_at
+      let unreadQuery = supabase
+        .from('chat_messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('room_id', roomId)
+        .is('deleted_at', null)
+        .or(`author_id.is.null,author_id.neq.${currentUser.id}`)
+
+      if (lastReadAt) {
+        unreadQuery = unreadQuery.gt('created_at', lastReadAt)
+      }
+
+      const { count, error } = await unreadQuery
+
+      if (cancelled) return
+
+      if (error) {
+        console.error('Failed to load unread group chat count', error)
+        return
+      }
+
+      setUnreadMessageCount(count ?? 0)
+    }
+
+    const handleRealtimeChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ table?: string }>).detail
+      if (!detail || !['chat_messages', 'chat_room_members', 'chat_rooms'].includes(detail.table ?? '')) return
+      void loadUnreadMessageCount()
+    }
+
+    void loadUnreadMessageCount()
+    const pollId = window.setInterval(() => {
+      void loadUnreadMessageCount()
+    }, 15000)
+
+    window.addEventListener('contas:realtime-change', handleRealtimeChange as EventListener)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(pollId)
+      window.removeEventListener('contas:realtime-change', handleRealtimeChange as EventListener)
+    }
+  }, [currentUser?.id])
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -3060,12 +3146,17 @@ export function GroupChatWidget() {
           'fixed bottom-4 right-4 z-[60] h-14 w-14 rounded-full bg-primary shadow-[var(--elevation-lg)] transition-transform duration-200 hover:scale-105 hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:bottom-6 sm:right-6',
           (open || isFullscreen) && 'hidden',
         )}
-        aria-label={open ? 'Close group chat' : 'Open group chat'}
+        aria-label={unreadMessageCount > 0 ? `Open group chat, ${unreadMessageCount} unread messages` : 'Open group chat'}
         aria-expanded={open}
         aria-controls='group-chat-panel'
         onClick={() => handleOpenChange(!open)}
       >
         {open ? <X className='h-6 w-6' aria-hidden='true' /> : <MessageSquareText className='h-6 w-6' aria-hidden='true' />}
+        {unreadMessageCount > 0 ? (
+          <span className='absolute -right-0.5 -top-0.5 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-semibold leading-none text-white shadow-md'>
+            {unreadMessageCount > 99 ? '99+' : unreadMessageCount}
+          </span>
+        ) : null}
       </Button>
 
       {open && !isFullscreen ? (
