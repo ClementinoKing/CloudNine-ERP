@@ -78,3 +78,4 @@ export default defineConfig([
 The live frontend is published from the built `dist/` output to the `build` branch through `.github/workflows/frontend-deploy.yml`. That branch is the Hostinger-style static deploy target this repo already matches with `public/.htaccess`.
 # CloudNine-ERP
 # CloudNine-ERP
+# CloudNine-ERP
