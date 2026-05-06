@@ -6,9 +6,45 @@ import { useAuth } from '@/features/auth/context/auth-context'
 
 import { OnboardingShell } from '../components/onboarding-shell'
 
-const ROLE_OPTIONS = ['Individual Contributor', 'Manager', 'Director', 'Founder', 'Student'] as const
-const FUNCTION_OPTIONS = ['Product', 'Engineering', 'Design', 'Operations', 'Marketing', 'Sales'] as const
-const USE_CASE_OPTIONS = ['Task Management', 'Project Delivery', 'Cross-team Collaboration', 'Reporting & Visibility'] as const
+const ROLE_OPTIONS = [
+  'C-Suite / Executive',
+  'Managing Director',
+  'Department Head',
+  'Manager / Team Lead',
+  'Finance & Accounting',
+  'Operations',
+  'HR & People',
+  'IT / Systems Admin',
+  'Individual Contributor',
+  'Consultant / Advisor',
+] as const
+
+const FUNCTION_OPTIONS = [
+  'Finance & Accounting',
+  'Human Resources',
+  'Supply Chain & Procurement',
+  'Operations & Logistics',
+  'Sales & Revenue',
+  'Customer Service',
+  'IT & Systems',
+  'Project Management',
+  'Marketing',
+  'Legal & Compliance',
+  'Engineering & Production',
+  'Executive / Strategy',
+] as const
+
+const USE_CASE_OPTIONS = [
+  'Financial Management & Reporting',
+  'HR & Payroll Management',
+  'Project & Delivery Management',
+  'Supply Chain & Inventory',
+  'Sales Pipeline & CRM',
+  'Operations & Process Automation',
+  'Cross-department Collaboration',
+  'Executive Dashboards & Analytics',
+  'Compliance & Audit Trails',
+] as const
 
 export function OnboardingWorkPage() {
   const navigate = useNavigate()
@@ -22,13 +58,13 @@ export function OnboardingWorkPage() {
 
   return (
     <OnboardingShell
-      title='Tell us about your work'
-      subtitle='This helps us tailor your organization setup and recommendations.'
+      title='Tell us about your organization'
+      subtitle='This helps us configure your ERP modules and tailor the system to how your business operates.'
       backTo='/onboarding/name'
     >
       <div className='space-y-4'>
         <div className='space-y-2'>
-          <label className='text-sm font-medium text-foreground'>What&apos;s your role?</label>
+          <label className='text-sm font-medium text-foreground'>What&apos;s your role in the organization?</label>
           <select
             value={role}
             onChange={(event) => setRole(event.target.value)}
@@ -44,7 +80,7 @@ export function OnboardingWorkPage() {
         </div>
 
         <div className='space-y-2'>
-          <label className='text-sm font-medium text-foreground'>Which function best describes your work?</label>
+          <label className='text-sm font-medium text-foreground'>Which business function do you work in?</label>
           <select
             value={workFunction}
             onChange={(event) => setWorkFunction(event.target.value)}
@@ -60,7 +96,7 @@ export function OnboardingWorkPage() {
         </div>
 
         <div className='space-y-2'>
-          <label className='text-sm font-medium text-foreground'>What do you want to use Spryar Tech for?</label>
+          <label className='text-sm font-medium text-foreground'>What will you primarily use CloudNine ERP for?</label>
           <select
             value={useCase}
             onChange={(event) => setUseCase(event.target.value)}

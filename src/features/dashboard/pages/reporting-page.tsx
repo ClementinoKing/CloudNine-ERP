@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { useOrganization } from '@/features/organization/context/organization-context'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 
@@ -425,6 +426,7 @@ function ReportingPageSkeleton() {
 }
 
 export function ReportingPage() {
+  const { currentOrganizationId } = useOrganization()
   const cached = readReportingCache()
   const [tasks, setTasks] = useState<ReportingTaskRow[]>(cached?.tasks ?? [])
   const [goals, setGoals] = useState<GoalRow[]>(cached?.goals ?? [])
@@ -462,12 +464,13 @@ export function ReportingPage() {
         .from('tasks')
         .select(
           'id,title,created_at,due_at,completed_at,project_id,assigned_to,status,status_id,task_status:status_id(key,label),project:project_id(id,name),assignee:assigned_to(id,full_name,department)',
-        ),
-      supabase.from('goals').select('id,title,cycle,health,owner_id,department,due_at,updated_at'),
-      supabase.from('goal_links').select('goal_id,project_id'),
+        )
+        .eq('organization_id', currentOrganizationId),
+      supabase.from('goals').select('id,title,cycle,health,owner_id,department,due_at,updated_at').eq('organization_id', currentOrganizationId),
+      supabase.from('goal_links').select('goal_id,project_id').eq('organization_id', currentOrganizationId),
       supabase.from('goal_checkins').select('id,goal_id,author_id,created_at,blockers,next_actions').order('created_at', { ascending: false }).limit(80),
-      supabase.from('profiles').select('id,full_name,department').order('full_name', { ascending: true }),
-      supabase.from('projects').select('id,name').order('name', { ascending: true }),
+      supabase.from('profiles').select('id,full_name,department').eq('organization_id', currentOrganizationId).order('full_name', { ascending: true }),
+      supabase.from('projects').select('id,name').eq('organization_id', currentOrganizationId).order('name', { ascending: true }),
     ]).then(([tasksResult, goalsResult, linksResult, checkinsResult, profilesResult, projectsResult]) => {
       if (cancelled) return
       const nextTasks = (tasksResult.data as ReportingTaskRow[] | null) ?? []
@@ -497,7 +500,7 @@ export function ReportingPage() {
     return () => {
       cancelled = true
     }
-  }, [refreshKey])
+  }, [currentOrganizationId, refreshKey])
 
   useEffect(() => {
     if (!rpcSupported) return
@@ -511,6 +514,7 @@ export function ReportingPage() {
       p_status: filters.statusKey === 'all' ? null : filters.statusKey,
       p_project: filters.projectId === 'all' ? null : filters.projectId,
       p_search: filters.search.trim() || null,
+      p_organization_id: currentOrganizationId,
     }
 
     void Promise.all([
@@ -547,7 +551,7 @@ export function ReportingPage() {
     return () => {
       cancelled = true
     }
-  }, [filters, rpcSupported, refreshKey])
+  }, [currentOrganizationId, filters, rpcSupported, refreshKey])
 
   const profileById = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles])
 

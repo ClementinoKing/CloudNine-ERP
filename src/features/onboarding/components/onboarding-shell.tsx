@@ -40,7 +40,7 @@ export function OnboardingShell({
         <section className='flex flex-col px-5 py-6 sm:px-8 lg:px-10'>
           <div className='mb-8 flex items-center justify-between'>
             <div className='space-y-0.5'>
-              <p className='text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground'>Spryar Tech</p>
+              <p className='text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground'>CloudNine ERP</p>
               <p className='text-sm font-medium text-foreground'>Onboarding</p>
             </div>
             {backTo ? (

@@ -1161,8 +1161,8 @@ async function buildPowerPointFile(fileName: string, pages: PdfLayoutPage[]) {
   const { default: PptxGenJS } = await import('npm:pptxgenjs')
   const pptx = new PptxGenJS()
   pptx.layout = 'LAYOUT_WIDE'
-  pptx.author = 'Spryar Tech'
-  pptx.company = 'Spryar Tech'
+  pptx.author = 'CloudNine ERP'
+  pptx.company = 'CloudNine ERP'
   pptx.subject = 'PDF conversion output'
   pptx.title = stripPdfExtension(fileName).trim() || 'Converted PDF'
 

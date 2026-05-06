@@ -1,5 +1,19 @@
-import { CalendarClock, ChartColumnBig, FolderKanban, Rocket, UsersRound } from 'lucide-react'
+import {
+  BarChart3,
+  CalendarClock,
+  ChartColumnBig,
+  CheckSquare,
+  FileText,
+  FolderKanban,
+  FolderPlus,
+  ListChecks,
+  Target,
+  UserPlus,
+  UsersRound,
+  type LucideIcon,
+} from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -23,6 +37,15 @@ type DashboardTask = {
   createdAt: string
 }
 type DashboardProject = { id: string; name: string; color: string }
+type DashboardQuickActionEvent = 'contas:open-create-task' | 'contas:open-create-project' | 'contas:open-invite-people'
+type DashboardQuickAction = {
+  id: string
+  title: string
+  description: string
+  icon: LucideIcon
+  tone: string
+  onSelect: () => void
+}
 type DashboardCachePayload = {
   tasks: DashboardTask[]
   projects: DashboardProject[]
@@ -116,6 +139,10 @@ function formatDueLabel(value: string | null) {
   const today = startOfLocalDay(new Date())
   if (isSameDay(startOfLocalDay(parsed), today)) return 'Today'
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(parsed)
+}
+
+function dispatchDashboardQuickAction(eventName: DashboardQuickActionEvent) {
+  window.dispatchEvent(new CustomEvent(eventName))
 }
 
 function readDashboardCache(cacheKey: string): DashboardCachePayload | null {
@@ -221,6 +248,7 @@ function DashboardHomeSkeleton() {
 
 export function DashboardHomePage() {
   const { currentOrganization } = useOrganization()
+  const navigate = useNavigate()
   const [trendRange, setTrendRange] = useState<TrendRange>('30d')
   const cacheKey = `${DASHBOARD_HOME_CACHE_KEY_PREFIX}:${currentOrganization.id}`
   const [tasks, setTasks] = useState<DashboardTask[]>(() => {
@@ -232,6 +260,68 @@ export function DashboardHomePage() {
     return cached?.projects ?? []
   })
   const [loading, setLoading] = useState(() => tasks.length === 0 && projects.length === 0)
+
+  const quickActions = useMemo<DashboardQuickAction[]>(
+    () => [
+      {
+        id: 'create-task',
+        title: 'Create task',
+        description: 'Capture a task, owner, priority, and due date.',
+        icon: CheckSquare,
+        tone: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600',
+        onSelect: () => dispatchDashboardQuickAction('contas:open-create-task'),
+      },
+      {
+        id: 'create-project',
+        title: 'New project',
+        description: 'Start a project workspace with owner and timeline.',
+        icon: FolderPlus,
+        tone: 'border-sky-500/20 bg-sky-500/10 text-sky-600',
+        onSelect: () => dispatchDashboardQuickAction('contas:open-create-project'),
+      },
+      {
+        id: 'invite-teammate',
+        title: 'Invite teammate',
+        description: 'Add someone to the organization and active work.',
+        icon: UserPlus,
+        tone: 'border-violet-500/20 bg-violet-500/10 text-violet-600',
+        onSelect: () => dispatchDashboardQuickAction('contas:open-invite-people'),
+      },
+      {
+        id: 'my-tasks',
+        title: 'My tasks',
+        description: 'Open your assigned task queue and board.',
+        icon: ListChecks,
+        tone: 'border-amber-500/20 bg-amber-500/10 text-amber-600',
+        onSelect: () => navigate('/dashboard/my-tasks'),
+      },
+      {
+        id: 'goals',
+        title: 'Plan goals',
+        description: 'Review outcomes, milestones, and progress.',
+        icon: Target,
+        tone: 'border-rose-500/20 bg-rose-500/10 text-rose-600',
+        onSelect: () => navigate('/dashboard/goals'),
+      },
+      {
+        id: 'documents',
+        title: 'Documents',
+        description: 'Open shared files, folders, and uploads.',
+        icon: FileText,
+        tone: 'border-indigo-500/20 bg-indigo-500/10 text-indigo-600',
+        onSelect: () => navigate('/dashboard/documents'),
+      },
+      {
+        id: 'reporting',
+        title: 'Reporting',
+        description: 'Check performance and delivery signals.',
+        icon: BarChart3,
+        tone: 'border-cyan-500/20 bg-cyan-500/10 text-cyan-600',
+        onSelect: () => navigate('/dashboard/reporting'),
+      },
+    ],
+    [navigate],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -669,15 +759,28 @@ export function DashboardHomePage() {
             <CardTitle>Quick Actions</CardTitle>
             <CardDescription>High-frequency actions for team leads</CardDescription>
           </CardHeader>
-          <CardContent className='space-y-2'>
-            <Button variant='outline' className='w-full justify-start gap-2'>
-              <Rocket className='h-4 w-4' aria-hidden='true' />
-              New Project
-            </Button>
-            <Button variant='outline' className='w-full justify-start gap-2'>
-              <CalendarClock className='h-4 w-4' aria-hidden='true' />
-              Plan Sprint
-            </Button>
+          <CardContent className='grid gap-2 overflow-y-auto pr-1 sm:grid-cols-2'>
+            {quickActions.map((action) => {
+              const Icon = action.icon
+
+              return (
+                <Button
+                  key={action.id}
+                  type='button'
+                  variant='outline'
+                  className='group h-auto w-full justify-start gap-2.5 rounded-lg border-border/80 px-3 py-3 text-left transition hover:border-primary/30 hover:bg-primary/5'
+                  onClick={action.onSelect}
+                >
+                  <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border', action.tone)}>
+                    <Icon className='h-4 w-4' aria-hidden='true' />
+                  </span>
+                  <span className='min-w-0 flex-1'>
+                    <span className='block text-sm font-semibold text-foreground'>{action.title}</span>
+                    <span className='mt-0.5 block whitespace-normal text-xs leading-4 text-muted-foreground'>{action.description}</span>
+                  </span>
+                </Button>
+              )
+            })}
           </CardContent>
         </Card>
       </section>

@@ -22,7 +22,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? D
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? ''
 const RESEND_FROM_EMAIL = Deno.env.get('RESEND_FROM_EMAIL') ?? ''
 const TASK_REMINDER_DISPATCH_TOKEN = Deno.env.get('TASK_REMINDER_DISPATCH_TOKEN') ?? ''
-const APP_BASE_URL = Deno.env.get('APP_BASE_URL') ?? 'https://spryartech.cloudninetech.co.za'
+const APP_BASE_URL = Deno.env.get('APP_BASE_URL') ?? 'https://cloudninetech.co.za'
 const BRAND_LOGO_URL = 'https://pub-7d1e5686dccc4c4b82b655d5aed298ae.r2.dev/images/Spryar_Tech.png'
 
 function json(body: unknown, status = 200) {
@@ -104,7 +104,7 @@ function buildMessage(reminderType: ReminderType, taskTitle: string, taskUrl: st
         <table width="100%" style="max-width:600px;background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;">
           <tr>
             <td style="padding:28px;border-bottom:1px solid #e2e8f0;text-align:center;">
-              <img src="${BRAND_LOGO_URL}" alt="Spryar Tech" style="height:42px;">
+              <img src="${BRAND_LOGO_URL}" alt="CloudNine ERP" style="height:42px;">
             </td>
           </tr>
           <tr>
@@ -117,14 +117,14 @@ function buildMessage(reminderType: ReminderType, taskTitle: string, taskUrl: st
           </tr>
           <tr>
             <td style="padding:8px 28px;">
-              <a href="${safeTaskUrl}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#fdbe13;color:#111827;text-decoration:none;font-weight:700;">
+              <a href="${safeTaskUrl}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#1a8fe3;color:#ffffff;text-decoration:none;font-weight:700;">
                 Open task
               </a>
             </td>
           </tr>
           <tr>
             <td style="padding:20px 28px 28px 28px;border-top:1px solid #e2e8f0;">
-              <p style="font-size:12px;color:#94a3b8;margin:0;">This reminder was sent by Spryar Tech based on the task due date.</p>
+              <p style="font-size:12px;color:#94a3b8;margin:0;">This reminder was sent by CloudNine ERP based on the task due date.</p>
             </td>
           </tr>
         </table>

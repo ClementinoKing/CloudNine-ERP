@@ -1,11 +1,11 @@
 {
   "rules": [
     {
-      "id": "spryartech-documents-browser-read",
+      "id": "cloudnine-erp-documents-browser-read",
       "allowed": {
         "origins": [
-          "https://spryar.tech",
-          "https://www.spryar.tech",
+          "https://cloudninetech.co.za",
+          "https://www.cloudninetech.co.za",
           "http://localhost:3000",
           "http://localhost:4173",
           "http://localhost:5173",

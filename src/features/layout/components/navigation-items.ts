@@ -1,6 +1,7 @@
 import {
   Bell,
   ChartNoAxesColumn,
+  CircleUserRound,
   Goal,
   House,
   ListChecks,
@@ -14,6 +15,7 @@ export const SIDEBAR_SECTIONS: NavSection[] = [
     title: 'Main',
     items: [
       { label: 'Home', path: '/dashboard/home', icon: House },
+      { label: 'Profile', path: '/dashboard/profile', icon: CircleUserRound },
       { label: 'My Tasks', path: '/dashboard/my-tasks', icon: ListChecks },
       { label: 'Notifications', path: '/dashboard/notifications', icon: Bell },
     ],

@@ -111,8 +111,11 @@ function createInitialOnboarding({
 }): OnboardingState {
   return {
     completed,
-    currentStep: completed ? 'tools' : 'name',
+    currentStep: completed ? 'tools' : 'organization',
     fullName,
+    organizationId: '',
+    organizationName: '',
+    organizationIndustry: '',
     role: '',
     workFunction: '',
     useCase: '',
@@ -505,16 +508,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) throw error
       if (!data.session) throw new Error('Supabase login did not return a session.')
 
+      // Only check account status if a profile exists.
+      // New users won't have one yet — they'll be sent to onboarding by the route guard.
       const profile = await fetchProfileSnapshot(data.session.user.id)
-      if (!profile) {
-        await supabase.auth.signOut().catch(() => undefined)
-        throw new Error('Account access could not be verified. Contact your administrator.')
-      }
-
-      const accountStatus = profile.account_status ?? 'active'
-      if (accountStatus !== 'active') {
-        await supabase.auth.signOut().catch(() => undefined)
-        throw new Error(getAccessDeniedMessage(accountStatus))
+      if (profile) {
+        const accountStatus = profile.account_status ?? 'active'
+        if (accountStatus !== 'active') {
+          await supabase.auth.signOut().catch(() => undefined)
+          throw new Error(getAccessDeniedMessage(accountStatus))
+        }
       }
 
       setSession(mapSupabaseSession(data.session))
@@ -522,38 +524,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [setSession],
   )
 
-  const register = useCallback(async ({ name, email, password }: RegisterPayload) => {
-    const onboarding = createInitialOnboarding({ fullName: name, completed: true })
-    const username = generateUsernameCandidate(name, email)
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: name,
-          username,
-          onboarding,
-        },
-      },
-    })
+  const register = useCallback(async ({ email, password }: RegisterPayload) => {
+    const { data, error } = await supabase.auth.signUp({ email, password })
 
     if (error) throw error
 
-    let activeSession = data.session
-
-    if (!activeSession) {
-      const signInResult = await supabase.auth.signInWithPassword({ email, password })
-      if (signInResult.error) {
-        throw new Error('Supabase did not create an active session. Confirm the email or disable email confirmation.')
-      }
-      activeSession = signInResult.data.session
+    if (!data.session) {
+      // Email confirmation is required — no session yet.
+      throw new Error('email_confirmation_required')
     }
 
-    if (!activeSession) {
-      throw new Error('Supabase did not return an active session after sign up.')
-    }
-
-    setSession(mapSupabaseSession(activeSession))
+    setSession(mapSupabaseSession(data.session))
   }, [setSession])
 
   const updateCurrentUser = useCallback(

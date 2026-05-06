@@ -608,8 +608,8 @@ async function buildPowerPointBlob(source: SelectedPdfSource, onProgress?: (prog
   onProgress?.({ percent: 92, label: 'Building PowerPoint file' })
   const pptx = new PptxGenJS()
   pptx.layout = 'LAYOUT_WIDE'
-  pptx.author = 'Spryar Tech'
-  pptx.company = 'Spryar Tech'
+  pptx.author = 'CloudNine ERP'
+  pptx.company = 'CloudNine ERP'
   pptx.subject = 'PDF conversion output'
   pptx.title = extracted.title
 

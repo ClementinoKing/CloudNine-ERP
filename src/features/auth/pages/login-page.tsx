@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { Eye, EyeOff, LogIn } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { z } from 'zod'
 
 import { Button } from '@/components/ui/button'
@@ -113,7 +113,12 @@ export function LoginPage() {
         </Button>
       </form>
 
-      <p className='mt-6 text-sm text-muted-foreground'>Need access? Contact your administrator for an invite.</p>
+      <p className='mt-6 text-sm text-muted-foreground'>
+        Do not have an account?{' '}
+        <Link className='font-medium text-primary hover:underline' to='/register'>
+          Create one
+        </Link>
+      </p>
     </AuthLayout>
   )
 }

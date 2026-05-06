@@ -261,7 +261,6 @@ function isDirectAvatarUrl(value?: string | null) {
 }
 
 const SETTINGS_TABS: Array<{ key: SettingsTabKey; label: string }> = [
-  { key: 'profile', label: 'Profile' },
   { key: 'organization', label: 'Organization' },
   { key: 'notifications', label: 'Notifications' },
   { key: 'account', label: 'Account' },
@@ -302,11 +301,11 @@ async function getAdminFunctionHeaders(preferredToken?: string | null) {
   return { Authorization: `Bearer ${refreshed.session.access_token}` }
 }
 
-export function SettingsPage() {
+export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean }) {
   const { currentUser, session, updateCurrentUser } = useAuth()
   const { currentOrganization } = useOrganization()
 
-  const [activeTab, setActiveTab] = useState<SettingsTabKey>('profile')
+  const [activeTab, setActiveTab] = useState<SettingsTabKey>(profileOnly ? 'profile' : 'organization')
 
   const [emailUpdates, setEmailUpdates] = useState(true)
   const [pushAlerts, setPushAlerts] = useState(false)
@@ -551,6 +550,10 @@ export function SettingsPage() {
   }
 
   useEffect(() => {
+    setActiveTab(profileOnly ? 'profile' : 'organization')
+  }, [profileOnly])
+
+  useEffect(() => {
     if (!isAdmin) return
     if (activeTab !== 'admin') return
     void loadAdminInvitations()
@@ -558,9 +561,9 @@ export function SettingsPage() {
 
   useEffect(() => {
     if (!isAdmin && activeTab === 'admin') {
-      setActiveTab('profile')
+      setActiveTab(profileOnly ? 'profile' : 'organization')
     }
-  }, [activeTab, isAdmin])
+  }, [activeTab, isAdmin, profileOnly])
 
   const toggleInviteProject = (projectId: string) => {
     setSelectedInviteProjectIds((current) =>
@@ -1403,7 +1406,7 @@ export function SettingsPage() {
               <div className='rounded-lg border p-4'>
                 <div className='flex flex-col gap-4 md:flex-row md:items-center md:justify-between'>
                   <div>
-                    <p className='font-medium text-foreground'>Download Spryar Tech Mobile App</p>
+                    <p className='font-medium text-foreground'>Download CloudNine ERP Mobile App</p>
                     <p className='text-sm text-muted-foreground'>
                       Scan the QR code to open the mobile app download page.
                     </p>
@@ -1415,7 +1418,7 @@ export function SettingsPage() {
                   <div className='rounded-md border bg-card p-2'>
                     <img
                       src='https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=https%3A%2F%2Fcontas.app%2Fdownload'
-                      alt='QR code to download the Spryar Tech mobile app'
+                      alt='QR code to download the CloudNine ERP mobile app'
                       width={160}
                       height={160}
                       className='h-24 w-24 md:h-28 md:w-28'
@@ -1427,7 +1430,7 @@ export function SettingsPage() {
                 <div className='flex items-center gap-3'>
                   <SmartphoneNfc className='h-4 w-4 text-muted-foreground' aria-hidden='true' />
                   <div>
-                    <p className='font-medium text-foreground'>Spryar Tech Mobile App</p>
+                    <p className='font-medium text-foreground'>CloudNine ERP Mobile App</p>
                     <p className='text-sm text-muted-foreground'>Sync push alerts and mobile activity updates.</p>
                   </div>
                 </div>
@@ -1544,31 +1547,33 @@ export function SettingsPage() {
 
   return (
     <div className='space-y-6'>
-      <Card>
-        <CardContent className='p-3'>
-          <div className='overflow-x-auto'>
-            <div className='inline-flex min-w-full gap-1 rounded-lg bg-muted/35 p-1'>
-              {SETTINGS_TABS.map((tab) => (
-                (tab.key !== 'admin' || isAdmin) ? (
-                <button
-                  key={tab.key}
-                  type='button'
-                  onClick={() => setActiveTab(tab.key)}
-                  className={cn(
-                    'rounded-md px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                    activeTab === tab.key
-                      ? 'bg-card text-foreground border shadow-[inset_0_0_0_1px_hsl(var(--border))]'
-                      : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-                  )}
-                >
-                  {tab.label}
-                </button>
-                ) : null
-              ))}
+      {profileOnly ? null : (
+        <Card>
+          <CardContent className='p-3'>
+            <div className='overflow-x-auto'>
+              <div className='inline-flex min-w-full gap-1 rounded-lg bg-muted/35 p-1'>
+                {SETTINGS_TABS.map((tab) => (
+                  (tab.key !== 'admin' || isAdmin) ? (
+                  <button
+                    key={tab.key}
+                    type='button'
+                    onClick={() => setActiveTab(tab.key)}
+                    className={cn(
+                      'rounded-md px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      activeTab === tab.key
+                        ? 'bg-card text-foreground border shadow-[inset_0_0_0_1px_hsl(var(--border))]'
+                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                    )}
+                  >
+                    {tab.label}
+                  </button>
+                  ) : null
+                ))}
+              </div>
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>{renderActiveSection()}</Card>
     </div>

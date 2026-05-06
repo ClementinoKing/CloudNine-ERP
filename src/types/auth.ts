@@ -1,10 +1,13 @@
-export type OnboardingStep = 'name' | 'work' | 'tools'
+export type OnboardingStep = 'organization' | 'name' | 'work' | 'tools'
 export type AccountStatus = 'active' | 'deactivated' | 'deleted'
 
 export interface OnboardingState {
   completed: boolean
   currentStep: OnboardingStep
   fullName: string
+  organizationId: string
+  organizationName: string
+  organizationIndustry: string
   role: string
   workFunction: string
   useCase: string
@@ -37,7 +40,6 @@ export interface LoginPayload {
 }
 
 export interface RegisterPayload {
-  name: string
   email: string
   password: string
 }

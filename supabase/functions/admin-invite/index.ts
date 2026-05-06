@@ -26,24 +26,8 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? D
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? ''
 const RESEND_FROM_EMAIL = Deno.env.get('RESEND_FROM_EMAIL') ?? ''
 const TEMP_PASSWORD = '12345678'
-const FALLBACK_APP_BASE_URL = 'https://spryartech.cloudninetech.co.za'
+const FALLBACK_APP_BASE_URL = 'https://cloudninetech.co.za'
 const BRAND_LOGO_URL = 'https://pub-7d1e5686dccc4c4b82b655d5aed298ae.r2.dev/images/Spryar_Tech.png'
-const INVITE_JOB_TITLES = new Set([
-  'Managing Director',
-  'HR & Compliance Manager',
-  'Accounting Manager',
-  'Senior Accountant',
-  'Junior Accountant',
-  'Payroll and Regulatory Support Officer',
-  'Junior Business Executive Officer',
-])
-const INVITE_DEPARTMENTS = new Set([
-  'Executive Leadership',
-  'Accounting & Financial Services',
-  'Payroll & Regulatory Services',
-  'Human Resources & Compliance',
-  'Business Development & Client Services',
-])
 
 function getAppBaseUrl() {
   return (Deno.env.get('APP_BASE_URL') ?? FALLBACK_APP_BASE_URL).replace(/\/+$/, '')
@@ -106,7 +90,7 @@ async function sendResendInviteEmail(input: {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Spryar Tech Organization Invitation</title>
+  <title>CloudNine ERP Organization Invitation</title>
   <style>
     body{
       margin:0;
@@ -134,12 +118,12 @@ async function sendResendInviteEmail(input: {
     .info-row{ margin-bottom:12px; font-size:14px; line-height:1.5; color:#4b5563; }
     .info-row:last-child{ margin-bottom:0; }
     .label{ display:block; font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:#b77900; margin-bottom:4px; }
-    .password-box{ display:inline-block; margin-top:6px; background:#fff7d6; border:1px solid #fde68a; padding:8px 14px; border-radius:6px; font-weight:700; font-size:16px; color:#111827; letter-spacing:1px; }
+    .password-box{ display:inline-block; margin-top:6px; background:#e8f4fd; border:1px solid #93c5fd; padding:8px 14px; border-radius:6px; font-weight:700; font-size:16px; color:#111827; letter-spacing:1px; }
     .cta-wrap{ margin:28px 0 20px; }
-    .cta-button{ display:inline-block; background:#fdbe13; color:#111827 !important; text-decoration:none; font-size:15px; font-weight:700; padding:14px 26px; border-radius:8px; }
+    .cta-button{ display:inline-block; background:#1a8fe3; color:#ffffff !important; text-decoration:none; font-size:15px; font-weight:700; padding:14px 26px; border-radius:8px; }
     .helper-text{ font-size:13px; line-height:1.6; color:#4b5563; }
-    .helper-text a{ color:#b77900; text-decoration:underline; word-break:break-word; }
-    .note{ margin-top:20px; padding:14px 16px; background:#fffbeb; border-left:3px solid #fdbe13; border-radius:6px; font-size:13px; line-height:1.6; color:#4b5563; }
+    .helper-text a{ color:#1a6fb3; text-decoration:underline; word-break:break-word; }
+    .note{ margin-top:20px; padding:14px 16px; background:#eff6ff; border-left:3px solid #1a8fe3; border-radius:6px; font-size:13px; line-height:1.6; color:#4b5563; }
     .footer{ border-top:1px solid #e7edf3; padding:22px 40px 28px; text-align:center; background:#ffffff; font-size:12px; line-height:1.6; color:#6a7898; }
     @media only screen and (max-width:640px){
       .email-wrapper{ padding:20px 10px !important; }
@@ -159,7 +143,7 @@ async function sendResendInviteEmail(input: {
               <td class="header">
                 <img
                   src="${BRAND_LOGO_URL}"
-                  alt="Spryar Tech"
+                  alt="CloudNine ERP"
                   class="logo"
                 />
               </td>
@@ -221,7 +205,7 @@ async function sendResendInviteEmail(input: {
             </tr>
             <tr>
               <td class="footer">
-                © 2026 Spryar Tech. All rights reserved.<br />
+                © 2026 CloudNine ERP. All rights reserved.<br />
                 This invitation was sent to give you access to your organization workspace.
               </td>
             </tr>
@@ -287,7 +271,7 @@ async function requireAdmin(req: Request) {
   const serviceClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
   const { data: profile, error: profileError } = await serviceClient
     .from('profiles')
-    .select('id, full_name, email, role_label')
+    .select('id, full_name, email, role_label, organization_id')
     .eq('id', authData.user.id)
     .maybeSingle()
 
@@ -299,11 +283,30 @@ async function requireAdmin(req: Request) {
     return { error: json({ ok: false, status: 'error', message: 'Admin access required.' }, 403) }
   }
 
+  const { data: membership, error: membershipError } = await serviceClient
+    .from('organization_members')
+    .select('organization_id, role')
+    .eq('user_id', authData.user.id)
+    .in('role', ['owner', 'admin'])
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (membershipError) {
+    return { error: json({ ok: false, status: 'error', message: membershipError.message }, 500) }
+  }
+
+  const organizationId = membership?.organization_id ?? profile?.organization_id
+  if (!organizationId) {
+    return { error: json({ ok: false, status: 'error', message: 'No organization membership found.' }, 403) }
+  }
+
   return {
     serviceClient,
     user: {
       id: authData.user.id,
       fullName: profile?.full_name ?? authData.user.email ?? 'Admin',
+      organizationId,
     },
   }
 }
@@ -338,6 +341,7 @@ Deno.serve(async (req) => {
     const { data, error } = await serviceClient
       .from('organization_invitations')
       .select('id, email, role, status, created_at, expires_at')
+      .eq('organization_id', user.organizationId)
       .order('created_at', { ascending: false })
       .limit(200)
 
@@ -363,6 +367,7 @@ Deno.serve(async (req) => {
       .from('organization_invitations')
       .update({ status: 'revoked', revoked_at: new Date().toISOString() })
       .eq('id', payload.invitationId)
+      .eq('organization_id', user.organizationId)
       .select('id')
       .maybeSingle()
 
@@ -377,6 +382,7 @@ Deno.serve(async (req) => {
       .from('organization_invitations')
       .select('id, email, role, status, metadata')
       .eq('id', payload.invitationId)
+      .eq('organization_id', user.organizationId)
       .maybeSingle()
 
     if (invitationError) return json({ ok: false, status: 'error', message: invitationError.message }, 500)
@@ -437,16 +443,39 @@ Deno.serve(async (req) => {
   if (!department) {
     return json({ ok: false, status: 'error', message: 'Department is required.' }, 400)
   }
-  if (!INVITE_JOB_TITLES.has(jobTitle)) {
-    return json({ ok: false, status: 'error', message: 'Invalid job title selected.' }, 400)
-  }
-  if (!INVITE_DEPARTMENTS.has(department)) {
+  const { data: departmentRecord, error: departmentError } = await serviceClient
+    .from('departments')
+    .select('id')
+    .eq('organization_id', user.organizationId)
+    .eq('name', department)
+    .eq('is_active', true)
+    .is('archived_at', null)
+    .limit(1)
+    .maybeSingle()
+
+  if (departmentError || !departmentRecord?.id) {
     return json({ ok: false, status: 'error', message: 'Invalid department selected.' }, 400)
+  }
+
+  const { data: jobRecord, error: jobError } = await serviceClient
+    .from('jobs')
+    .select('id')
+    .eq('organization_id', user.organizationId)
+    .eq('department_id', departmentRecord.id)
+    .eq('name', jobTitle)
+    .eq('is_active', true)
+    .is('archived_at', null)
+    .limit(1)
+    .maybeSingle()
+
+  if (jobError || !jobRecord?.id) {
+    return json({ ok: false, status: 'error', message: 'Invalid job title selected.' }, 400)
   }
 
   const { data: existingPending } = await serviceClient
     .from('organization_invitations')
     .select('id')
+    .eq('organization_id', user.organizationId)
     .eq('email', email)
     .eq('status', 'pending')
     .order('created_at', { ascending: false })
@@ -468,6 +497,7 @@ Deno.serve(async (req) => {
     email_confirm: true,
     user_metadata: {
       full_name: fullName,
+      organization_id: user.organizationId,
       role_label: role,
       job_title: jobTitle,
       department,
@@ -487,6 +517,7 @@ Deno.serve(async (req) => {
 
   const { error: profileUpsertError } = await serviceClient.from('profiles').upsert({
     id: invitedUser.id,
+    organization_id: user.organizationId,
     full_name: fullName,
     username: fullName
       .toLowerCase()
@@ -503,7 +534,18 @@ Deno.serve(async (req) => {
     return json({ ok: false, status: 'error', message: profileUpsertError.message }, 500)
   }
 
+  const { error: membershipUpsertError } = await serviceClient.from('organization_members').upsert({
+    organization_id: user.organizationId,
+    user_id: invitedUser.id,
+    role,
+  })
+
+  if (membershipUpsertError) {
+    return json({ ok: false, status: 'error', message: membershipUpsertError.message }, 500)
+  }
+
   const invitationPayload = {
+    organization_id: user.organizationId,
     email,
     role,
     invited_by: user.id,

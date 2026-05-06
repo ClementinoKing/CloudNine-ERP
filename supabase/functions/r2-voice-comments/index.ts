@@ -8,7 +8,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 }
 
-const bucket = Deno.env.get('R2_BUCKET') ?? 'spryartech'
+const bucket = Deno.env.get('R2_BUCKET') ?? 'cloudnine-erp'
 const endpoint = Deno.env.get('R2_S3_ENDPOINT')
 const accessKeyId = Deno.env.get('R2_ACCESS_KEY_ID')
 const secretAccessKey = Deno.env.get('R2_SECRET_ACCESS_KEY')

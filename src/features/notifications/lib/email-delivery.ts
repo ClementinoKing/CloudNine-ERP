@@ -17,17 +17,17 @@ type NotificationDispatchItem = {
   appUrl?: string
 }
 
-const SPRYAR_SITE_URL = 'https://spryartech.cloudninetech.co.za'
+const CLOUDNINE_SITE_URL = 'https://cloudninetech.co.za'
 
 function resolveAppUrl(item: NotificationDispatchItem) {
   if (item.appUrl) return item.appUrl
   if (item.contextKind === 'chat') {
-    return `${SPRYAR_SITE_URL}/dashboard/home?openGroupChat=1`
+    return `${CLOUDNINE_SITE_URL}/dashboard/home?openGroupChat=1`
   }
   if (item.taskId) {
-    return `${SPRYAR_SITE_URL}/dashboard/notifications?openTaskId=${encodeURIComponent(item.taskId)}`
+    return `${CLOUDNINE_SITE_URL}/dashboard/notifications?openTaskId=${encodeURIComponent(item.taskId)}`
   }
-  return `${SPRYAR_SITE_URL}/dashboard/notifications`
+  return `${CLOUDNINE_SITE_URL}/dashboard/notifications`
 }
 
 export async function dispatchNotificationEmails(items: NotificationDispatchItem[]) {

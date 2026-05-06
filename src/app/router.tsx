@@ -12,9 +12,14 @@ import { ProjectsPage } from '@/features/dashboard/pages/projects-page'
 import { DocumentsPage } from '@/features/dashboard/pages/documents-page'
 import { ToolsPage } from '@/features/dashboard/pages/tools-page'
 import { LoginPage } from '@/features/auth/pages/login-page'
+import { RegisterPage } from '@/features/auth/pages/register-page'
 import { ResetPasswordPage } from '@/features/auth/pages/reset-password-page'
 import { AppShellLayout } from '@/features/layout/components/app-shell-layout'
 import { SettingsPage } from '@/features/settings/pages/settings-page'
+import { OnboardingNamePage } from '@/features/onboarding/pages/onboarding-name-page'
+import { OnboardingOrganizationPage } from '@/features/onboarding/pages/onboarding-organization-page'
+import { OnboardingWorkPage } from '@/features/onboarding/pages/onboarding-work-page'
+import { OnboardingToolsPage } from '@/features/onboarding/pages/onboarding-tools-page'
 
 const LAST_DASHBOARD_PATH_KEY = 'contas.last-dashboard-path'
 
@@ -43,18 +48,24 @@ export const router = createBrowserRouter([
     element: <AuthRedirectRoute />,
     children: [
       { path: '/login', element: <LoginPage /> },
+      { path: '/register', element: <RegisterPage /> },
     ],
   },
   {
     element: <ProtectedRoute />,
     children: [
       { path: '/reset-password', element: <ResetPasswordPage /> },
+      { path: '/onboarding/organization', element: <OnboardingOrganizationPage /> },
+      { path: '/onboarding/name', element: <OnboardingNamePage /> },
+      { path: '/onboarding/work', element: <OnboardingWorkPage /> },
+      { path: '/onboarding/tools', element: <OnboardingToolsPage /> },
       {
         path: '/dashboard',
         element: <AppShellLayout />,
         children: [
           { index: true, element: <Navigate to={getLastDashboardPath()} replace /> },
           { path: 'home', element: <DashboardHomePage /> },
+          { path: 'profile', element: <SettingsPage profileOnly /> },
           { path: 'my-tasks', element: <MyTasksPage /> },
           { path: 'notifications', element: <NotificationsPage /> },
           { path: 'reporting', element: <ReportingPage /> },

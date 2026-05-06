@@ -37,6 +37,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { DocumentViewerModal } from '@/components/document-viewer-modal'
 import { useAuth } from '@/features/auth/context/auth-context'
 import { dispatchNotificationEmails } from '@/features/notifications/lib/email-delivery'
+import { useOrganization } from '@/features/organization/context/organization-context'
 import {
   getAttachmentExtension,
   getDocumentStyle,
@@ -1090,6 +1091,7 @@ function MessageBubble({
 
 export function GroupChatWidget() {
   const { currentUser, session } = useAuth()
+  const { currentOrganizationId } = useOrganization()
   const location = useLocation()
   const [open, setOpen] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -1139,6 +1141,10 @@ export function GroupChatWidget() {
   const voiceStartAtRef = useRef(0)
   const stickToLatestRef = useRef(false)
   const hasInitialScrollRef = useRef(false)
+  const roomCacheSlug = useMemo(
+    () => (currentOrganizationId ? `${GENERAL_CHAT_ROOM_SLUG}:${currentOrganizationId}` : GENERAL_CHAT_ROOM_SLUG),
+    [currentOrganizationId],
+  )
 
   const profileById = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles])
   const messageById = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages])
@@ -1195,8 +1201,48 @@ export function GroupChatWidget() {
       .slice(0, 6)
   }, [mentionDraft, mentionOptions])
 
+  const resolveOrganizationRoom = useCallback(async () => {
+    if (!currentUser?.id || !currentOrganizationId) return null
+
+    const roomResult = await supabase
+      .from('chat_rooms')
+      .select('id, slug, name, description, last_message_at')
+      .eq('slug', GENERAL_CHAT_ROOM_SLUG)
+      .eq('organization_id', currentOrganizationId)
+      .maybeSingle()
+
+    if (roomResult.error) {
+      console.error('Failed to load organization group chat room', roomResult.error)
+      return null
+    }
+
+    if (roomResult.data) return roomResult.data as ChatRoomRow
+
+    const createResult = await supabase
+      .from('chat_rooms')
+      .insert({
+        organization_id: currentOrganizationId,
+        slug: GENERAL_CHAT_ROOM_SLUG,
+        name: 'General',
+        description: 'A shared team room for quick updates, questions, and mentions.',
+        room_type: 'group',
+        is_public: true,
+        is_default: true,
+        created_by: currentUser.id,
+      })
+      .select('id, slug, name, description, last_message_at')
+      .maybeSingle()
+
+    if (createResult.error) {
+      console.error('Failed to create organization group chat room', createResult.error)
+      return null
+    }
+
+    return (createResult.data ?? null) as ChatRoomRow | null
+  }, [currentOrganizationId, currentUser?.id])
+
   useEffect(() => {
-    if (!currentUser?.id) {
+    if (!currentUser?.id || !currentOrganizationId) {
       setUnreadMessageCount(0)
       return
     }
@@ -1204,19 +1250,16 @@ export function GroupChatWidget() {
     let cancelled = false
 
     const loadUnreadMessageCount = async () => {
-      const roomResult = await supabase.from('chat_rooms').select('id').eq('slug', GENERAL_CHAT_ROOM_SLUG).maybeSingle()
+      const roomData = await resolveOrganizationRoom()
 
       if (cancelled) return
 
-      if (roomResult.error || !roomResult.data) {
-        if (roomResult.error) {
-          console.error('Failed to load unread group chat room', roomResult.error)
-        }
+      if (!roomData) {
         setUnreadMessageCount(0)
         return
       }
 
-      const roomId = roomResult.data.id
+      const roomId = roomData.id
       const membershipResult = await supabase
         .from('chat_room_members')
         .select('last_read_at')
@@ -1278,7 +1321,7 @@ export function GroupChatWidget() {
       window.clearInterval(pollId)
       window.removeEventListener('contas:realtime-change', handleRealtimeChange as EventListener)
     }
-  }, [currentUser?.id])
+  }, [currentOrganizationId, currentUser?.id, resolveOrganizationRoom])
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -1491,7 +1534,7 @@ export function GroupChatWidget() {
       return
     }
 
-    const cachedState = background ? null : readCachedChatState(currentUser.id, GENERAL_CHAT_ROOM_SLUG)
+    const cachedState = background ? null : readCachedChatState(currentUser.id, roomCacheSlug)
     const hasCachedState = Boolean(cachedState)
     if (cachedState) {
       setRoom(cachedState.room)
@@ -1507,25 +1550,19 @@ export function GroupChatWidget() {
 
     hydratingRef.current = true
     try {
-      const roomResult = await supabase
-        .from('chat_rooms')
-        .select('id, slug, name, description, last_message_at')
-        .eq('slug', GENERAL_CHAT_ROOM_SLUG)
-        .maybeSingle()
+      const roomData = await resolveOrganizationRoom()
 
-      if (roomResult.error || !roomResult.data) {
-        console.error('Failed to load group chat room', roomResult.error)
+      if (!roomData) {
+        console.error('Failed to load group chat room', null)
         if (!hasCachedState) {
           setRoom(null)
           setProfiles([])
           setRoomMembers([])
           setMessages([])
-          setError(roomResult.error?.message ?? 'Unable to load chat room.')
+          setError('Unable to load chat room.')
         }
         return
       }
-
-      const roomData = roomResult.data as ChatRoomRow
       setRoom(roomData)
 
       const nowIso = new Date().toISOString()
@@ -1697,7 +1734,7 @@ export function GroupChatWidget() {
               writeCachedChatState({
                 updatedAt: Date.now(),
                 userId: currentUser.id,
-                roomSlug: roomData.slug,
+                roomSlug: roomCacheSlug,
                 room: roomData,
                 profiles: profileRows,
                 roomMembers: memberRows,
@@ -1711,7 +1748,7 @@ export function GroupChatWidget() {
       writeCachedChatState({
         updatedAt: Date.now(),
         userId: currentUser.id,
-        roomSlug: roomData.slug,
+        roomSlug: roomCacheSlug,
         room: roomData,
         profiles: profileRows,
         roomMembers: memberRows,
@@ -1734,7 +1771,7 @@ export function GroupChatWidget() {
       }
       hydratingRef.current = false
     }
-  }, [currentUser?.id, loadTypingStates])
+  }, [currentUser?.id, loadTypingStates, roomCacheSlug, resolveOrganizationRoom])
 
   useEffect(() => {
     if (!open) return
@@ -1799,7 +1836,7 @@ export function GroupChatWidget() {
       writeCachedChatState({
         updatedAt: Date.now(),
         userId: currentUser.id,
-        roomSlug: room.slug,
+        roomSlug: roomCacheSlug,
         room,
         profiles,
         roomMembers,
@@ -1808,7 +1845,7 @@ export function GroupChatWidget() {
     } catch {
       // Ignore storage quota and serialization failures.
     }
-  }, [currentUser?.id, loading, messages, profiles, room, roomMembers])
+  }, [currentUser?.id, loading, messages, profiles, room, roomCacheSlug, roomMembers])
 
   const replaceMentionDraft = useCallback(
     (option: MentionOption) => {

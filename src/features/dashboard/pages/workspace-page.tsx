@@ -1,4 +1,25 @@
-import { CalendarDays, ChevronRight, FileText, Mail, Trash2, UserX, Users2, Workflow } from 'lucide-react'
+import {
+  Bell,
+  Building2,
+  CalendarDays,
+  ChevronDown,
+  ChevronRight,
+  CirclePlus,
+  FileText,
+  KeyRound,
+  Mail,
+  MapPin,
+  Pencil,
+  ReceiptText,
+  Shield,
+  Sparkles,
+  Trash2,
+  UserCog,
+  UserPlus,
+  UserX,
+  Users2,
+  Workflow,
+} from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -7,10 +28,12 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useAuth } from '@/features/auth/context/auth-context'
 import { notify } from '@/lib/notify'
 import { supabase } from '@/lib/supabase'
 import { useSearchParams } from 'react-router-dom'
+import { useOrganization } from '@/features/organization/context/organization-context'
 
 const WORKSPACE_MEMBERS_CACHE_KEY = 'contas.workspace.members.v1'
 const WORKSPACE_PRESENCE_CACHE_KEY = 'contas.workspace.presence.v1'
@@ -48,6 +71,40 @@ type OrganizationTimelineEvent = {
   starts_at: string
 }
 
+type DepartmentRow = {
+  id: string
+  organization_id: string
+  name: string
+  description: string | null
+  is_active: boolean
+  created_by: string | null
+  created_at: string
+  updated_at: string
+  archived_at: string | null
+}
+
+type JobRow = {
+  id: string
+  organization_id: string
+  department_id: string
+  name: string
+  description: string | null
+  is_active: boolean
+  created_by: string | null
+  created_at: string
+  updated_at: string
+  archived_at: string | null
+}
+
+type WorkspaceInvitation = {
+  id: string
+  email: string
+  role: string
+  status: string
+  created_at: string
+  expires_at: string | null
+}
+
 type WorkspaceCacheSnapshot = {
   members: TeamMember[]
   presenceSessions: PresenceSession[]
@@ -71,6 +128,48 @@ type TeamMemberUpdate = {
 
 type MemberAccountStatus = 'active' | 'deactivated' | 'deleted'
 type MemberAccountAction = 'deactivate' | 'delete' | 'reactivate'
+type WorkspaceSectionKey =
+  | 'overview'
+  | 'organization-settings'
+  | 'departments'
+  | 'jobs'
+  | 'roles-permissions'
+  | 'invitations'
+  | 'audit-logs'
+  | 'notification-settings'
+  | 'branches'
+  | 'business-units'
+  | 'employee-directory'
+  | 'org-chart'
+  | 'teams'
+  | 'schedules'
+  | 'leave-types'
+  | 'approval-workflows'
+  | 'invoice-settings'
+  | 'tax-settings'
+  | 'email-templates'
+  | 'templates'
+  | 'branding'
+  | 'api-keys'
+  | 'webhooks'
+  | 'two-factor'
+  | 'subscription'
+  | 'usage'
+  | 'import-export'
+  | 'backups'
+
+type WorkspaceSection = {
+  key: WorkspaceSectionKey
+  label: string
+  description: string
+  icon: typeof Building2
+  comingSoon?: boolean
+}
+
+type WorkspaceSectionGroup = {
+  title: string
+  items: WorkspaceSection[]
+}
 
 const WEEKDAY_LABELS: Record<WeekdayKey, string> = {
   monday: 'Mon',
@@ -82,30 +181,119 @@ const WEEKDAY_LABELS: Record<WeekdayKey, string> = {
   sunday: 'Sun',
 }
 
-const MEMBER_JOB_TITLES = [
-  'Managing Director',
-  'HR & Compliance Manager',
-  'Accounting Manager',
-  'Senior Accountant',
-  'Junior Accountant',
-  'Payroll and Regulatory Support Officer',
-  'Junior Business Executive Officer',
-] as const
-
-const MEMBER_DEPARTMENTS = [
-  'Executive Leadership',
-  'Accounting & Financial Services',
-  'Payroll & Regulatory Services',
-  'Human Resources & Compliance',
-  'Business Development & Client Services',
-] as const
-
 const MEMBER_ROLE_LABELS = [
   { value: 'member', label: 'Member' },
   { value: 'viewer', label: 'Viewer' },
   { value: 'admin', label: 'Admin' },
   { value: 'owner', label: 'Owner' },
 ] as const
+
+const V1_LIVE_SECTIONS = new Set<WorkspaceSectionKey>([
+  'overview',
+  'organization-settings',
+  'departments',
+  'jobs',
+  'roles-permissions',
+  'invitations',
+  'audit-logs',
+  'notification-settings',
+])
+
+const WORKSPACE_SECTION_GROUPS: WorkspaceSectionGroup[] = [
+  {
+    title: 'Organization',
+    items: [
+      { key: 'overview', label: 'Overview', description: 'Summary dashboard and quick actions.', icon: Sparkles },
+    ],
+  },
+  {
+    title: 'Setup',
+    items: [
+      { key: 'organization-settings', label: 'Organization Settings', description: 'Identity and structure settings.', icon: Building2 },
+      { key: 'branches', label: 'Branches', description: 'Branch and location setup.', icon: MapPin, comingSoon: true },
+      { key: 'business-units', label: 'Business Units', description: 'Unit-level operational grouping.', icon: Workflow, comingSoon: true },
+    ],
+  },
+  {
+    title: 'Workforce',
+    items: [
+      { key: 'departments', label: 'Departments', description: 'Department structure and occupancy.', icon: Users2 },
+      { key: 'jobs', label: 'Jobs', description: 'Roles and job-position mapping.', icon: UserCog },
+      { key: 'employee-directory', label: 'Employee Directory', description: 'Full organization people directory.', icon: Users2, comingSoon: true },
+      { key: 'org-chart', label: 'Org Chart', description: 'Visual reporting hierarchy.', icon: Workflow, comingSoon: true },
+    ],
+  },
+  {
+    title: 'Access Control',
+    items: [
+      { key: 'roles-permissions', label: 'Roles & Permissions', description: 'Access control matrix.', icon: Shield },
+      { key: 'teams', label: 'Teams', description: 'Group-based access control.', icon: Users2, comingSoon: true },
+      { key: 'invitations', label: 'Invitations', description: 'Invite and access lifecycle.', icon: UserPlus },
+    ],
+  },
+  {
+    title: 'Work Config',
+    items: [
+      { key: 'schedules', label: 'Schedules', description: 'Work schedule and shift templates.', icon: CalendarDays, comingSoon: true },
+      { key: 'leave-types', label: 'Leave Types', description: 'Leave and time-off setup.', icon: CalendarDays, comingSoon: true },
+      { key: 'approval-workflows', label: 'Approval Workflows', description: 'Approval path automation.', icon: Workflow, comingSoon: true },
+    ],
+  },
+  {
+    title: 'Finance',
+    items: [
+      { key: 'invoice-settings', label: 'Invoice Settings', description: 'Invoice numbering and templates.', icon: ReceiptText, comingSoon: true },
+      { key: 'tax-settings', label: 'Tax Settings', description: 'Tax policies and defaults.', icon: ReceiptText, comingSoon: true },
+    ],
+  },
+  {
+    title: 'Communication',
+    items: [
+      { key: 'notification-settings', label: 'Notifications', description: 'Organization notification defaults.', icon: Bell },
+      { key: 'email-templates', label: 'Email Templates', description: 'Template branding and copy.', icon: Mail, comingSoon: true },
+    ],
+  },
+  {
+    title: 'Documents',
+    items: [
+      { key: 'templates', label: 'Templates', description: 'Document template standards.', icon: FileText, comingSoon: true },
+      { key: 'branding', label: 'Branding', description: 'Branding across PDF and email assets.', icon: Building2, comingSoon: true },
+    ],
+  },
+  {
+    title: 'Integrations',
+    items: [
+      { key: 'api-keys', label: 'API Keys', description: 'External API key management.', icon: KeyRound, comingSoon: true },
+      { key: 'webhooks', label: 'Webhooks', description: 'Outbound event subscriptions.', icon: Workflow, comingSoon: true },
+    ],
+  },
+  {
+    title: 'Security',
+    items: [
+      { key: 'two-factor', label: '2FA', description: 'Multi-factor authentication policy.', icon: Shield, comingSoon: true },
+      { key: 'audit-logs', label: 'Audit Logs', description: 'Organization access and action traces.', icon: FileText },
+    ],
+  },
+  {
+    title: 'Billing',
+    items: [
+      { key: 'subscription', label: 'Subscription', description: 'Plan status and subscription details.', icon: ReceiptText, comingSoon: true },
+      { key: 'usage', label: 'Usage', description: 'Current usage and threshold visibility.', icon: Users2, comingSoon: true },
+    ],
+  },
+  {
+    title: 'Data',
+    items: [
+      { key: 'import-export', label: 'Import / Export', description: 'Data import and export operations.', icon: FileText, comingSoon: true },
+      { key: 'backups', label: 'Backups', description: 'Backup and restore controls.', icon: FileText, comingSoon: true },
+    ],
+  },
+]
+
+function isWorkspaceSectionKey(value: string | null): value is WorkspaceSectionKey {
+  if (!value) return false
+  return WORKSPACE_SECTION_GROUPS.some((group) => group.items.some((item) => item.key === value))
+}
 
 function readCachedArray<T>(key: string): T[] {
   try {
@@ -162,6 +350,114 @@ function memberStatusBadgeClass(status: MemberAccountStatus) {
     return 'border-rose-500/40 bg-rose-500/15 text-rose-200'
   }
   return 'border-emerald-500/40 bg-emerald-500/15 text-emerald-200'
+}
+
+function formatInvitationDate(value: string | null) {
+  if (!value) return 'Not set'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Not set'
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(date)
+}
+
+function invitationStatusClass(status: string) {
+  switch (status.toLowerCase()) {
+    case 'accepted':
+      return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600'
+    case 'revoked':
+    case 'expired':
+      return 'border-rose-500/30 bg-rose-500/10 text-rose-600'
+    default:
+      return 'border-amber-500/30 bg-amber-500/10 text-amber-600'
+  }
+}
+
+function openInvitePeopleDialog() {
+  window.dispatchEvent(new CustomEvent('contas:open-invite-people'))
+}
+
+function DepartmentSelectPopover({
+  value,
+  departments,
+  disabled,
+  placeholder = 'Select department',
+  onChange,
+  onAddDepartment,
+}: {
+  value: string
+  departments: DepartmentRow[]
+  disabled?: boolean
+  placeholder?: string
+  onChange: (departmentId: string) => void
+  onAddDepartment: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const selectedDepartment = departments.find((department) => department.id === value) ?? null
+  const filteredDepartments = departments.filter((department) =>
+    department.name.toLowerCase().includes(query.trim().toLowerCase()),
+  )
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type='button'
+          variant='outline'
+          className='h-10 w-full justify-between px-3 font-normal'
+          disabled={disabled}
+        >
+          <span className={selectedDepartment ? 'text-foreground' : 'text-muted-foreground'}>
+            {selectedDepartment?.name ?? placeholder}
+          </span>
+          <ChevronDown className='h-4 w-4 text-muted-foreground' />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className='w-[var(--radix-popover-trigger-width)] p-2' align='start'>
+        <div className='space-y-2'>
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder='Search departments'
+            className='h-9'
+          />
+          <div className='max-h-44 overflow-y-auto rounded-md border'>
+            {filteredDepartments.length === 0 ? (
+              <p className='px-3 py-2 text-xs text-muted-foreground'>No departments found.</p>
+            ) : (
+              filteredDepartments.map((department) => (
+                <button
+                  key={department.id}
+                  type='button'
+                  className='block w-full border-b border-border/60 px-3 py-2 text-left text-sm transition-colors last:border-b-0 hover:bg-muted/40'
+                  onClick={() => {
+                    onChange(department.id)
+                    setOpen(false)
+                    setQuery('')
+                  }}
+                >
+                  {department.name}
+                </button>
+              ))
+            )}
+          </div>
+          <Button
+            type='button'
+            size='sm'
+            variant='outline'
+            className='w-full justify-center gap-1.5'
+            onClick={() => {
+              setOpen(false)
+              setQuery('')
+              onAddDepartment()
+            }}
+          >
+            <CirclePlus className='h-4 w-4' />
+            Add department
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
 }
 
 function formatClockLabel(value: string) {
@@ -310,6 +606,10 @@ function MemberDetailsDialog({
   onOpenChange,
   onSave,
   onChangeAccountStatus,
+  departmentOptions,
+  jobsByDepartment,
+  onRequestCreateDepartment,
+  onRequestCreateJob,
 }: {
   member: TeamMember | null
   isAdmin: boolean
@@ -320,6 +620,10 @@ function MemberDetailsDialog({
   onOpenChange: (open: boolean) => void
   onSave: (memberId: string, updates: TeamMemberUpdate) => Promise<void>
   onChangeAccountStatus: (memberId: string, accountStatus: MemberAccountStatus) => Promise<void>
+  departmentOptions: string[]
+  jobsByDepartment: Record<string, string[]>
+  onRequestCreateDepartment: () => void
+  onRequestCreateJob: (departmentName?: string) => void
 }) {
   const [draft, setDraft] = useState<TeamMemberDraft>({
     fullName: '',
@@ -331,6 +635,10 @@ function MemberDetailsDialog({
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<MemberAccountAction | null>(null)
   const [actionSaving, setActionSaving] = useState(false)
+  const [departmentOpen, setDepartmentOpen] = useState(false)
+  const [departmentQuery, setDepartmentQuery] = useState('')
+  const [jobOpen, setJobOpen] = useState(false)
+  const [jobQuery, setJobQuery] = useState('')
 
   useEffect(() => {
     if (!open || !member) return
@@ -344,6 +652,10 @@ function MemberDetailsDialog({
     setActionSaving(false)
     setPendingAction(null)
     setErrorMessage(null)
+    setDepartmentOpen(false)
+    setDepartmentQuery('')
+    setJobOpen(false)
+    setJobQuery('')
   }, [member, open])
 
   const displayName = member?.full_name ?? member?.email ?? 'Unnamed user'
@@ -356,6 +668,9 @@ function MemberDetailsDialog({
   const deactivateLabel = accountStatus === 'active' ? 'Deactivate account' : 'Deactivate unavailable'
   const deleteLabel = accountStatus === 'deleted' ? 'Already deleted' : 'Delete account'
   const reactivateLabel = accountStatus === 'deleted' ? 'Restore account' : 'Reactivate account'
+  const filteredJobOptions = draft.department.trim() ? (jobsByDepartment[draft.department.trim()] ?? []) : []
+  const filteredDepartmentOptions = departmentOptions.filter((department) => department.toLowerCase().includes(departmentQuery.trim().toLowerCase()))
+  const filteredJobOptionsByQuery = filteredJobOptions.filter((job) => job.toLowerCase().includes(jobQuery.trim().toLowerCase()))
 
   const handleSave = async () => {
     if (!member) return
@@ -484,39 +799,117 @@ function MemberDetailsDialog({
                   </div>
                   <div className='space-y-2'>
                     <label className='text-sm font-medium text-foreground'>Department</label>
-                    <select
-                      value={draft.department}
-                      onChange={(event) => setDraft((current) => ({ ...current, department: event.target.value }))}
-                      className='h-10 w-full rounded-md border border-input bg-background px-3 text-sm'
-                    >
-                      <option value=''>Select department</option>
-                      {MEMBER_DEPARTMENTS.map((department) => (
-                        <option key={department} value={department}>
-                          {department}
-                        </option>
-                      ))}
-                      {draft.department.trim() && !MEMBER_DEPARTMENTS.includes(draft.department as (typeof MEMBER_DEPARTMENTS)[number]) ? (
-                        <option value={draft.department}>{draft.department}</option>
-                      ) : null}
-                    </select>
+                    <Popover open={departmentOpen} onOpenChange={setDepartmentOpen}>
+                      <PopoverTrigger asChild>
+                        <Button type='button' variant='outline' className='h-10 w-full justify-between px-3 font-normal'>
+                          <span className={draft.department ? 'text-foreground' : 'text-muted-foreground'}>
+                            {draft.department || 'Select department'}
+                          </span>
+                          <ChevronDown className='h-4 w-4 text-muted-foreground' />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className='w-[var(--radix-popover-trigger-width)] p-2' align='start'>
+                        <div className='space-y-2'>
+                          <Input
+                            value={departmentQuery}
+                            onChange={(event) => setDepartmentQuery(event.target.value)}
+                            placeholder='Search departments'
+                            className='h-9'
+                          />
+                          <div className='max-h-44 overflow-y-auto rounded-md border'>
+                            {filteredDepartmentOptions.length === 0 ? (
+                              <p className='px-3 py-2 text-xs text-muted-foreground'>No departments found.</p>
+                            ) : (
+                              filteredDepartmentOptions.map((department) => (
+                                <button
+                                  key={department}
+                                  type='button'
+                                  className='block w-full border-b border-border/60 px-3 py-2 text-left text-sm transition-colors last:border-b-0 hover:bg-muted/40'
+                                  onClick={() => {
+                                    setDraft((current) => ({ ...current, department, jobTitle: '' }))
+                                    setDepartmentOpen(false)
+                                    setDepartmentQuery('')
+                                    setJobQuery('')
+                                  }}
+                                >
+                                  {department}
+                                </button>
+                              ))
+                            )}
+                          </div>
+                          <Button
+                            type='button'
+                            size='sm'
+                            variant='outline'
+                            className='w-full justify-center gap-1.5'
+                            onClick={() => {
+                              setDepartmentOpen(false)
+                              onRequestCreateDepartment()
+                            }}
+                          >
+                            <CirclePlus className='h-4 w-4' />
+                            Add department
+                          </Button>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                   <div className='space-y-2'>
                     <label className='text-sm font-medium text-foreground'>Job title</label>
-                    <select
-                      value={draft.jobTitle}
-                      onChange={(event) => setDraft((current) => ({ ...current, jobTitle: event.target.value }))}
-                      className='h-10 w-full rounded-md border border-input bg-background px-3 text-sm'
-                    >
-                      <option value=''>Select job title</option>
-                      {MEMBER_JOB_TITLES.map((title) => (
-                        <option key={title} value={title}>
-                          {title}
-                        </option>
-                      ))}
-                      {draft.jobTitle.trim() && !MEMBER_JOB_TITLES.includes(draft.jobTitle as (typeof MEMBER_JOB_TITLES)[number]) ? (
-                        <option value={draft.jobTitle}>{draft.jobTitle}</option>
-                      ) : null}
-                    </select>
+                    <Popover open={jobOpen} onOpenChange={setJobOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type='button'
+                          variant='outline'
+                          className='h-10 w-full justify-between px-3 font-normal'
+                          disabled={!draft.department.trim()}
+                        >
+                          <span className={draft.jobTitle ? 'text-foreground' : 'text-muted-foreground'}>
+                            {draft.jobTitle || (draft.department.trim() ? 'Select job title' : 'Select department first')}
+                          </span>
+                          <ChevronDown className='h-4 w-4 text-muted-foreground' />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className='w-[var(--radix-popover-trigger-width)] p-2' align='start'>
+                        <div className='space-y-2'>
+                          <Input value={jobQuery} onChange={(event) => setJobQuery(event.target.value)} placeholder='Search jobs' className='h-9' />
+                          <div className='max-h-44 overflow-y-auto rounded-md border'>
+                            {filteredJobOptionsByQuery.length === 0 ? (
+                              <p className='px-3 py-2 text-xs text-muted-foreground'>No jobs found for this department.</p>
+                            ) : (
+                              filteredJobOptionsByQuery.map((job) => (
+                                <button
+                                  key={job}
+                                  type='button'
+                                  className='block w-full border-b border-border/60 px-3 py-2 text-left text-sm transition-colors last:border-b-0 hover:bg-muted/40'
+                                  onClick={() => {
+                                    setDraft((current) => ({ ...current, jobTitle: job }))
+                                    setJobOpen(false)
+                                    setJobQuery('')
+                                  }}
+                                >
+                                  {job}
+                                </button>
+                              ))
+                            )}
+                          </div>
+                          <Button
+                            type='button'
+                            size='sm'
+                            variant='outline'
+                            className='w-full justify-center gap-1.5'
+                            onClick={() => {
+                              setJobOpen(false)
+                              onRequestCreateJob(draft.department.trim() || undefined)
+                            }}
+                            disabled={!draft.department.trim()}
+                          >
+                            <CirclePlus className='h-4 w-4' />
+                            Add job
+                          </Button>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                   <div className='space-y-2 sm:col-span-2'>
                     <label className='text-sm font-medium text-foreground'>Role label</label>
@@ -699,15 +1092,39 @@ function MemberDetailsDialog({
 }
 
 export function WorkspacePage() {
+  const { currentOrganization } = useOrganization()
   const [initialWorkspaceCache] = useState(() => readWorkspaceCacheSnapshot())
   const { currentUser, updateCurrentUser, logout } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
+  const activeSection: WorkspaceSectionKey = isWorkspaceSectionKey(searchParams.get('section'))
+    ? (searchParams.get('section') as WorkspaceSectionKey)
+    : 'overview'
   const [members, setMembers] = useState<TeamMember[]>(() => initialWorkspaceCache.members)
   const [presenceSessions, setPresenceSessions] = useState<PresenceSession[]>(() => initialWorkspaceCache.presenceSessions)
   const [timelineEvents, setTimelineEvents] = useState<OrganizationTimelineEvent[]>(() => initialWorkspaceCache.timelineEvents)
+  const [invitations, setInvitations] = useState<WorkspaceInvitation[]>([])
   const [clockMs, setClockMs] = useState(() => Date.now())
   const [loadingWorkspace, setLoadingWorkspace] = useState(() => !initialWorkspaceCache.hasCache)
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null)
+  const [groupExpansionOverrides, setGroupExpansionOverrides] = useState<Record<string, boolean>>({})
+  const [departments, setDepartments] = useState<DepartmentRow[]>([])
+  const [jobs, setJobs] = useState<JobRow[]>([])
+  const [newDepartmentName, setNewDepartmentName] = useState('')
+  const [creatingDepartment, setCreatingDepartment] = useState(false)
+  const [editingDepartmentId, setEditingDepartmentId] = useState<string | null>(null)
+  const [editingDepartmentName, setEditingDepartmentName] = useState('')
+  const [departmentSavingId, setDepartmentSavingId] = useState<string | null>(null)
+  const [createDepartmentModalOpen, setCreateDepartmentModalOpen] = useState(false)
+  const [editDepartmentModalOpen, setEditDepartmentModalOpen] = useState(false)
+  const [newJobName, setNewJobName] = useState('')
+  const [newJobDepartmentId, setNewJobDepartmentId] = useState('')
+  const [creatingJob, setCreatingJob] = useState(false)
+  const [editingJobId, setEditingJobId] = useState<string | null>(null)
+  const [editingJobName, setEditingJobName] = useState('')
+  const [editingJobDepartmentId, setEditingJobDepartmentId] = useState('')
+  const [jobSavingId, setJobSavingId] = useState<string | null>(null)
+  const [createJobModalOpen, setCreateJobModalOpen] = useState(false)
+  const [editJobModalOpen, setEditJobModalOpen] = useState(false)
 
   useEffect(() => {
     const memberId = searchParams.get('memberId')
@@ -762,6 +1179,37 @@ export function WorkspacePage() {
         setTimelineEvents(timelineResult.data as OrganizationTimelineEvent[])
         writeCachedArray(WORKSPACE_TIMELINE_CACHE_KEY, timelineResult.data as OrganizationTimelineEvent[])
       }
+
+      const invitationsResult = await supabase
+        .from('organization_invitations')
+        .select('id, email, role, status, created_at, expires_at')
+        .order('created_at', { ascending: false })
+        .limit(25)
+
+      if (!cancelled && !invitationsResult.error && invitationsResult.data) {
+        setInvitations(invitationsResult.data as WorkspaceInvitation[])
+      }
+
+      const departmentsResult = await supabase
+        .from('departments')
+        .select('id, organization_id, name, description, is_active, created_by, created_at, updated_at, archived_at')
+        .eq('organization_id', currentOrganization.id)
+        .order('name', { ascending: true })
+
+      if (!cancelled && !departmentsResult.error && departmentsResult.data) {
+        setDepartments(departmentsResult.data as DepartmentRow[])
+      }
+
+      const jobsResult = await supabase
+        .from('jobs')
+        .select('id, organization_id, department_id, name, description, is_active, created_by, created_at, updated_at, archived_at')
+        .eq('organization_id', currentOrganization.id)
+        .order('name', { ascending: true })
+
+      if (!cancelled && !jobsResult.error && jobsResult.data) {
+        setJobs(jobsResult.data as JobRow[])
+      }
+
       if (!cancelled) {
         setLoadingWorkspace(false)
       }
@@ -798,7 +1246,41 @@ export function WorkspacePage() {
           refreshTimer = null
         }, 200)
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'organization_invitations' }, () => {
+        if (refreshTimer !== null) {
+          window.clearTimeout(refreshTimer)
+        }
+        refreshTimer = window.setTimeout(() => {
+          void loadMembersAndPresence()
+          refreshTimer = null
+        }, 200)
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'departments' }, () => {
+        if (refreshTimer !== null) {
+          window.clearTimeout(refreshTimer)
+        }
+        refreshTimer = window.setTimeout(() => {
+          void loadMembersAndPresence()
+          refreshTimer = null
+        }, 200)
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, () => {
+        if (refreshTimer !== null) {
+          window.clearTimeout(refreshTimer)
+        }
+        refreshTimer = window.setTimeout(() => {
+          void loadMembersAndPresence()
+          refreshTimer = null
+        }, 200)
+      })
       .subscribe()
+
+    const handleRealtimeChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ table?: string }>).detail
+      if (!detail?.table || !['profiles', 'organization_invitations'].includes(detail.table)) return
+      void loadMembersAndPresence()
+    }
+    window.addEventListener('contas:realtime-change', handleRealtimeChange as EventListener)
 
     pollTimer = window.setInterval(() => {
       void loadMembersAndPresence()
@@ -812,9 +1294,10 @@ export function WorkspacePage() {
       if (pollTimer !== null) {
         window.clearInterval(pollTimer)
       }
+      window.removeEventListener('contas:realtime-change', handleRealtimeChange as EventListener)
       void supabase.removeChannel(channel)
     }
-  }, [])
+  }, [currentOrganization.id])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -827,11 +1310,80 @@ export function WorkspacePage() {
   }, [])
 
   const activeCollaborators = members.filter((member) => member.account_status === 'active').length
+  const departmentMap = useMemo(() => {
+    const map = new Map<string, TeamMember[]>()
+    for (const member of members) {
+      const key = member.department?.trim() || 'Unassigned'
+      const existing = map.get(key) ?? []
+      existing.push(member)
+      map.set(key, existing)
+    }
+    return Array.from(map.entries())
+      .map(([name, team]) => ({ name, count: team.length, active: team.filter((member) => member.account_status === 'active').length }))
+      .sort((a, b) => b.count - a.count)
+  }, [members])
+  const activeDepartmentRows = useMemo(
+    () => departments.filter((department) => department.is_active && !department.archived_at),
+    [departments],
+  )
+  const departmentOptions = useMemo(
+    () =>
+      activeDepartmentRows
+        .map((department) => department.name.trim())
+        .filter((name) => name.length > 0)
+        .sort((left, right) => left.localeCompare(right)),
+    [activeDepartmentRows],
+  )
+  const activeJobRows = useMemo(() => jobs.filter((job) => job.is_active && !job.archived_at), [jobs])
+  const jobsByDepartment = useMemo(() => {
+    const departmentNameById = new Map(activeDepartmentRows.map((department) => [department.id, department.name.trim()]))
+    const grouped: Record<string, string[]> = {}
+
+    for (const job of activeJobRows) {
+      const departmentName = departmentNameById.get(job.department_id)
+      const jobName = job.name.trim()
+      if (!departmentName || !jobName) continue
+
+      const existing = grouped[departmentName] ?? []
+      if (!existing.includes(jobName)) {
+        existing.push(jobName)
+      }
+      grouped[departmentName] = existing
+    }
+
+    for (const departmentName of Object.keys(grouped)) {
+      grouped[departmentName].sort((left, right) => left.localeCompare(right))
+    }
+
+    return grouped
+  }, [activeDepartmentRows, activeJobRows])
+  const jobsMap = useMemo(() => {
+    const map = new Map<string, TeamMember[]>()
+    for (const member of members) {
+      const key = member.job_title?.trim() || 'Unspecified role'
+      const existing = map.get(key) ?? []
+      existing.push(member)
+      map.set(key, existing)
+    }
+    return map
+  }, [members])
+  const roleMap = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const member of members) {
+      const key = member.role_label?.trim().toLowerCase() || 'member'
+      map.set(key, (map.get(key) ?? 0) + 1)
+    }
+    return Array.from(map.entries())
+      .map(([role, count]) => ({ role, count }))
+      .sort((a, b) => b.count - a.count)
+  }, [members])
   const onlineCollaborators = useMemo(
     () => members.filter((member) => isMemberOnline(member, presenceSessions, clockMs)).length,
     [clockMs, members, presenceSessions],
   )
   const isAdmin = (currentUser?.roleLabel ?? '').toLowerCase() === 'admin'
+  const canManageDepartments = ['admin', 'owner'].includes((currentUser?.roleLabel ?? '').toLowerCase())
+  const canInviteUsers = ['admin', 'owner'].includes((currentUser?.roleLabel ?? '').toLowerCase())
   const selectedMember = useMemo(
     () => members.find((member) => member.id === selectedMemberId) ?? null,
     [members, selectedMemberId],
@@ -900,140 +1452,691 @@ export function WorkspacePage() {
     }
   }
 
+  const handleCreateDepartment = async () => {
+    const name = newDepartmentName.trim()
+    if (!name) {
+      notify.error('Department name is required')
+      return
+    }
+
+    setCreatingDepartment(true)
+    try {
+      const { data, error } = await supabase
+        .from('departments')
+        .insert({
+          organization_id: currentOrganization.id,
+          name,
+          created_by: currentUser?.id ?? null,
+          is_active: true,
+        })
+        .select('id, organization_id, name, description, is_active, created_by, created_at, updated_at, archived_at')
+        .maybeSingle()
+
+      if (error) throw error
+      if (!data) throw new Error('Department was not created.')
+
+      setDepartments((current) => [...current, data as DepartmentRow].sort((left, right) => left.name.localeCompare(right.name)))
+      setNewDepartmentName('')
+      setCreateDepartmentModalOpen(false)
+      notify.success('Department created', { description: `${name} is now available for your organization.` })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to create department.'
+      notify.error('Unable to create department', { description: message })
+    } finally {
+      setCreatingDepartment(false)
+    }
+  }
+
+  const handleRenameDepartment = async (departmentId: string) => {
+    const name = editingDepartmentName.trim()
+    if (!name) {
+      notify.error('Department name is required')
+      return
+    }
+
+    setDepartmentSavingId(departmentId)
+    try {
+      const { data, error } = await supabase
+        .from('departments')
+        .update({ name })
+        .eq('id', departmentId)
+        .eq('organization_id', currentOrganization.id)
+        .select('id, organization_id, name, description, is_active, created_by, created_at, updated_at, archived_at')
+        .maybeSingle()
+
+      if (error) throw error
+      if (!data) throw new Error('Department was not updated.')
+
+      setDepartments((current) =>
+        current
+          .map((department) => (department.id === departmentId ? (data as DepartmentRow) : department))
+          .sort((left, right) => left.name.localeCompare(right.name)),
+      )
+      setEditingDepartmentId(null)
+      setEditingDepartmentName('')
+      setEditDepartmentModalOpen(false)
+      notify.success('Department updated')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to update department.'
+      notify.error('Unable to update department', { description: message })
+    } finally {
+      setDepartmentSavingId(null)
+    }
+  }
+
+  const handleDeleteDepartment = async (departmentId: string) => {
+    setDepartmentSavingId(departmentId)
+    try {
+      const { error } = await supabase
+        .from('departments')
+        .delete()
+        .eq('id', departmentId)
+        .eq('organization_id', currentOrganization.id)
+
+      if (error) throw error
+
+      setDepartments((current) => current.filter((department) => department.id !== departmentId))
+      if (editingDepartmentId === departmentId) {
+        setEditingDepartmentId(null)
+        setEditingDepartmentName('')
+      }
+      notify.success('Department deleted')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to delete department.'
+      notify.error('Unable to delete department', { description: message })
+    } finally {
+      setDepartmentSavingId(null)
+    }
+  }
+
+  const handleCreateJob = async () => {
+    const name = newJobName.trim()
+    if (!name) {
+      notify.error('Job name is required')
+      return
+    }
+    if (!newJobDepartmentId) {
+      notify.error('Select a department for this job')
+      return
+    }
+
+    setCreatingJob(true)
+    try {
+      const { data, error } = await supabase
+        .from('jobs')
+        .insert({
+          organization_id: currentOrganization.id,
+          department_id: newJobDepartmentId,
+          name,
+          created_by: currentUser?.id ?? null,
+          is_active: true,
+        })
+        .select('id, organization_id, department_id, name, description, is_active, created_by, created_at, updated_at, archived_at')
+        .maybeSingle()
+
+      if (error) throw error
+      if (!data) throw new Error('Job was not created.')
+
+      setJobs((current) => [...current, data as JobRow].sort((left, right) => left.name.localeCompare(right.name)))
+      setNewJobName('')
+      setNewJobDepartmentId('')
+      setCreateJobModalOpen(false)
+      notify.success('Job created', { description: `${name} has been added.` })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to create job.'
+      notify.error('Unable to create job', { description: message })
+    } finally {
+      setCreatingJob(false)
+    }
+  }
+
+  const handleUpdateJob = async (jobId: string) => {
+    const name = editingJobName.trim()
+    if (!name) {
+      notify.error('Job name is required')
+      return
+    }
+    if (!editingJobDepartmentId) {
+      notify.error('Select a department for this job')
+      return
+    }
+
+    setJobSavingId(jobId)
+    try {
+      const { data, error } = await supabase
+        .from('jobs')
+        .update({ name, department_id: editingJobDepartmentId })
+        .eq('id', jobId)
+        .eq('organization_id', currentOrganization.id)
+        .select('id, organization_id, department_id, name, description, is_active, created_by, created_at, updated_at, archived_at')
+        .maybeSingle()
+
+      if (error) throw error
+      if (!data) throw new Error('Job was not updated.')
+
+      setJobs((current) => current.map((job) => (job.id === jobId ? (data as JobRow) : job)).sort((left, right) => left.name.localeCompare(right.name)))
+      setEditingJobId(null)
+      setEditingJobName('')
+      setEditingJobDepartmentId('')
+      setEditJobModalOpen(false)
+      notify.success('Job updated')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to update job.'
+      notify.error('Unable to update job', { description: message })
+    } finally {
+      setJobSavingId(null)
+    }
+  }
+
+  const handleDeleteJob = async (jobId: string) => {
+    setJobSavingId(jobId)
+    try {
+      const { error } = await supabase.from('jobs').delete().eq('id', jobId).eq('organization_id', currentOrganization.id)
+      if (error) throw error
+
+      setJobs((current) => current.filter((job) => job.id !== jobId))
+      if (editingJobId === jobId) {
+        setEditingJobId(null)
+        setEditingJobName('')
+        setEditingJobDepartmentId('')
+      }
+      notify.success('Job deleted')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to delete job.'
+      notify.error('Unable to delete job', { description: message })
+    } finally {
+      setJobSavingId(null)
+    }
+  }
+
   if (loadingWorkspace) {
     return <WorkspacePageSkeleton />
   }
 
+  const setSection = (section: WorkspaceSectionKey) => {
+    const next = new URLSearchParams(searchParams)
+    next.set('section', section)
+    setSearchParams(next, { replace: true })
+  }
+
+  const selectedSectionMeta =
+    WORKSPACE_SECTION_GROUPS.flatMap((group) => group.items).find((item) => item.key === activeSection) ??
+    WORKSPACE_SECTION_GROUPS[0].items[0]
+
   return (
-    <div className='space-y-4'>
-      <Card>
-        <CardContent className='flex flex-wrap items-center justify-between gap-3 p-4 sm:p-5'>
-          <div>
-            <p className='text-sm font-semibold text-foreground'>Organization Hub</p>
-            <p className='text-xs text-muted-foreground'>Shared context, team visibility, and operating signals.</p>
-          </div>
-          <Button size='sm' className='gap-1.5'>
-            <Workflow className='h-4 w-4' />
-            Manage organization
-          </Button>
-        </CardContent>
-      </Card>
-
-      <section className='grid gap-4 xl:grid-cols-[1.35fr_1fr]'>
-        <Card>
-          <CardHeader className='pb-3'>
-            <CardTitle>Team Members</CardTitle>
+    <div className='grid min-h-[calc(100vh-8rem)] gap-4 lg:grid-cols-[280px_minmax(0,1fr)]'>
+      <aside className='h-full w-full lg:sticky lg:top-4 lg:self-start'>
+        <Card className='h-full w-full lg:h-[calc(100vh-8rem)]'>
+          <CardHeader className='px-6 pb-3 pt-6'>
+            <CardTitle className='text-xs uppercase tracking-[0.18em] text-muted-foreground'>Sections</CardTitle>
           </CardHeader>
-          <CardContent className='space-y-2'>
-            {members.length === 0 ? (
-              <p className='rounded-md border bg-muted/10 px-3 py-4 text-sm text-muted-foreground'>
-                No team profiles found yet.
-              </p>
-            ) : (
-              members.map((member) => {
-                const displayName = member.full_name ?? member.email ?? 'Unnamed user'
-                const online = isMemberOnline(member, presenceSessions, clockMs)
-                const available = isMemberAvailable(member)
-                return (
+          <CardContent className='h-[calc(100%-4.5rem)] space-y-3 overflow-y-auto px-5 pb-6'>
+            {WORKSPACE_SECTION_GROUPS.map((group) => {
+              const hasActive = group.items.some((item) => item.key === activeSection)
+              const isExpanded = groupExpansionOverrides[group.title] ?? (hasActive || group.title === 'Organization')
+              return (
+                <div key={group.title} className='overflow-hidden rounded-2xl border border-border/80 bg-muted/5'>
                   <button
-                    key={member.id}
                     type='button'
-                    onClick={() => setSelectedMemberId(member.id)}
-                    className='flex w-full items-center justify-between rounded-md border bg-muted/10 px-3 py-2.5 text-left transition-colors hover:border-primary/30 hover:bg-muted/20'
+                    onClick={() =>
+                      setGroupExpansionOverrides((current) => ({
+                        ...current,
+                        [group.title]: !isExpanded,
+                      }))
+                    }
+                    className='flex w-full items-center justify-between px-5 py-4 text-left'
                   >
-                    <div className='flex items-center gap-3'>
-                      <div className='relative'>
-                        <Avatar className='h-9 w-9 border'>
-                          {member.avatar_url ? <AvatarImage src={member.avatar_url} alt={displayName} /> : null}
-                          <AvatarFallback className='text-xs font-semibold'>{initials(displayName)}</AvatarFallback>
-                        </Avatar>
-                        <span
-                          className={
-                            online
-                              ? 'absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-background bg-emerald-400'
-                              : 'absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-background bg-rose-400'
-                          }
-                          aria-label={online ? 'Online' : 'Offline'}
-                          title={online ? 'Online' : 'Offline'}
-                        />
-                      </div>
-                      <div>
-                        <p className='text-sm font-medium text-foreground'>{displayName}</p>
-                        <p className='text-xs text-muted-foreground'>{memberRole(member)}</p>
-                        <p className='text-[11px] text-muted-foreground/80'>{member.department ?? 'No department'}</p>
-                        {member.account_status !== 'active' ? (
-                          <Badge variant='outline' className={`mt-2 ${memberStatusBadgeClass(member.account_status)} text-[10px] uppercase tracking-wide`}>
-                            {memberStatusLabel(member.account_status)}
-                          </Badge>
-                        ) : null}
-                      </div>
-                    </div>
-                    <div className='flex items-center gap-3'>
-                      <Badge
-                        variant='outline'
-                        className={
-                          available
-                            ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
-                            : 'border-rose-500/40 bg-rose-500/15 text-rose-300'
-                        }
-                      >
-                        {available ? 'Available' : 'Unavailable'}
-                      </Badge>
-                      <ChevronRight className='h-4 w-4 text-muted-foreground' />
-                    </div>
+                    <span className={`text-xs font-semibold uppercase tracking-[0.14em] ${hasActive ? 'text-foreground' : 'text-muted-foreground'}`}>
+                      {group.title}
+                    </span>
+                    <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                   </button>
-                )
-              })
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className='pb-3'>
-            <CardTitle>Organization Signals</CardTitle>
-          </CardHeader>
-          <CardContent className='space-y-3'>
-            <div className='rounded-md border bg-muted/10 p-3'>
-              <p className='inline-flex items-center gap-2 text-sm font-medium'>
-                <Users2 className='h-4 w-4 text-blue-400' />
-                {activeCollaborators} active collaborators
-              </p>
-              <p className='mt-1 text-xs text-muted-foreground'>{onlineCollaborators} currently online.</p>
-            </div>
-            <div className='rounded-md border bg-muted/10 p-3'>
-              <p className='inline-flex items-center gap-2 text-sm font-medium'>
-                <FileText className='h-4 w-4 text-emerald-400' />
-                6 shared docs updated
-              </p>
-              <p className='mt-1 text-xs text-muted-foreground'>Knowledge base and project docs changed today.</p>
-            </div>
-          </CardContent>
-        </Card>
-      </section>
-
-      <Card>
-        <CardHeader className='pb-3'>
-          <CardTitle>Upcoming Organization Timeline</CardTitle>
-        </CardHeader>
-        <CardContent className='space-y-2'>
-          {timelineEvents.length === 0 ? (
-            <p className='rounded-md border bg-muted/10 px-3 py-4 text-sm text-muted-foreground'>No upcoming events.</p>
-          ) : (
-            timelineEvents.map((event) => (
-              <article key={event.id} className='flex items-center justify-between rounded-md border bg-muted/10 px-3 py-2.5'>
-                <div>
-                  <p className='text-sm font-medium text-foreground'>{event.title}</p>
-                  <p className='text-xs text-muted-foreground'>{event.event_type}</p>
+                  {isExpanded ? (
+                    <div className='space-y-2 border-t border-border/70 px-3 pb-3 pt-3'>
+                      {group.items.map((item) => {
+                        const Icon = item.icon
+                        const isActive = activeSection === item.key
+                        const isComingSoon = item.comingSoon ?? !V1_LIVE_SECTIONS.has(item.key)
+                        return (
+                          <button
+                            key={item.key}
+                            type='button'
+                            onClick={() => setSection(item.key)}
+                            className={`flex w-full items-center justify-between rounded-xl px-3.5 py-3 text-left transition-colors ${
+                              isActive
+                                ? 'bg-primary/10 text-foreground'
+                                : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                            }`}
+                          >
+                            <span className='flex min-w-0 items-center gap-2'>
+                              <Icon className='h-4 w-4 shrink-0' />
+                              <span className='truncate text-sm'>{item.label}</span>
+                            </span>
+                            {isComingSoon ? (
+                              <Badge variant='outline' className='text-[10px] uppercase tracking-wide text-muted-foreground'>
+                                Soon
+                              </Badge>
+                            ) : null}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ) : null}
                 </div>
-                <span className='inline-flex items-center gap-1.5 text-xs text-muted-foreground'>
-                  <CalendarDays className='h-3.5 w-3.5' />
-                  {formatTimelineTime(event.starts_at)}
-                </span>
-              </article>
-            ))
-          )}
-        </CardContent>
-      </Card>
+              )
+            })}
+          </CardContent>
+        </Card>
+      </aside>
+
+      <div className='space-y-4'>
+        <Card>
+          <CardContent className='flex flex-wrap items-center justify-between gap-3 p-4 sm:p-5'>
+            <div>
+              <p className='text-sm font-semibold text-foreground'>{selectedSectionMeta.label}</p>
+              <p className='text-xs text-muted-foreground'>{selectedSectionMeta.description}</p>
+            </div>
+            {activeSection === 'overview' ? (
+              <div className='flex gap-2'>
+                <Button size='sm' variant='outline' className='gap-1.5' onClick={openInvitePeopleDialog} disabled={!canInviteUsers}>
+                  <UserPlus className='h-4 w-4' />
+                  Invite user
+                </Button>
+                <Button size='sm' className='gap-1.5' onClick={() => setSection('departments')}>
+                  <Building2 className='h-4 w-4' />
+                  Create department
+                </Button>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+
+        {activeSection === 'overview' ? (
+          <>
+            <section className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
+              <Card><CardContent className='p-4'><p className='text-xs text-muted-foreground'>Users</p><p className='text-2xl font-semibold'>{activeCollaborators}</p></CardContent></Card>
+              <Card><CardContent className='p-4'><p className='text-xs text-muted-foreground'>Departments</p><p className='text-2xl font-semibold'>{activeDepartmentRows.length}</p></CardContent></Card>
+              <Card><CardContent className='p-4'><p className='text-xs text-muted-foreground'>Active Modules</p><p className='text-2xl font-semibold'>8</p></CardContent></Card>
+              <Card><CardContent className='p-4'><p className='text-xs text-muted-foreground'>Online Now</p><p className='text-2xl font-semibold'>{onlineCollaborators}</p></CardContent></Card>
+            </section>
+            <Card>
+              <CardHeader className='pb-3'>
+                <div className='flex flex-wrap items-center justify-between gap-3'>
+                  <div>
+                    <CardTitle>Invitations</CardTitle>
+                    <p className='mt-1 text-xs text-muted-foreground'>Pending and recent organization invite activity.</p>
+                  </div>
+                  <Button size='sm' className='gap-1.5' onClick={openInvitePeopleDialog} disabled={!canInviteUsers}>
+                    <UserPlus className='h-4 w-4' />
+                    Invite user
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {invitations.length === 0 ? (
+                  <p className='rounded-md border bg-muted/10 px-3 py-4 text-sm text-muted-foreground'>No invitations yet.</p>
+                ) : (
+                  <div className='overflow-x-auto rounded-md border'>
+                    <table className='w-full min-w-[680px] text-sm'>
+                      <thead className='bg-muted/30 text-left text-xs uppercase tracking-wide text-muted-foreground'>
+                        <tr>
+                          <th className='px-3 py-2'>Email</th>
+                          <th className='px-3 py-2'>Role</th>
+                          <th className='px-3 py-2'>Status</th>
+                          <th className='px-3 py-2'>Sent</th>
+                          <th className='px-3 py-2'>Expires</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {invitations.slice(0, 6).map((invite) => (
+                          <tr key={invite.id} className='border-t border-border/70'>
+                            <td className='px-3 py-2.5 font-medium text-foreground'>{invite.email}</td>
+                            <td className='px-3 py-2.5 capitalize text-muted-foreground'>{invite.role}</td>
+                            <td className='px-3 py-2.5'>
+                              <Badge variant='outline' className={invitationStatusClass(invite.status)}>
+                                {invite.status}
+                              </Badge>
+                            </td>
+                            <td className='px-3 py-2.5 text-muted-foreground'>{formatInvitationDate(invite.created_at)}</td>
+                            <td className='px-3 py-2.5 text-muted-foreground'>{formatInvitationDate(invite.expires_at)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            <section className='grid gap-4 xl:grid-cols-[1.35fr_1fr]'>
+              <Card>
+                <CardHeader className='pb-3'><CardTitle>Team Members</CardTitle></CardHeader>
+                <CardContent className='space-y-2'>
+                  {members.length === 0 ? <p className='rounded-md border bg-muted/10 px-3 py-4 text-sm text-muted-foreground'>No team profiles found yet.</p> : members.slice(0, 8).map((member) => {
+                    const displayName = member.full_name ?? member.email ?? 'Unnamed user'
+                    const online = isMemberOnline(member, presenceSessions, clockMs)
+                    return (
+                      <button key={member.id} type='button' onClick={() => setSelectedMemberId(member.id)} className='flex w-full items-center justify-between rounded-md border bg-muted/10 px-3 py-2.5 text-left transition-colors hover:border-primary/30 hover:bg-muted/20'>
+                        <div className='flex items-center gap-3'>
+                          <div className='relative'>
+                            <Avatar className='h-9 w-9 border'>
+                              {member.avatar_url ? <AvatarImage src={member.avatar_url} alt={displayName} /> : null}
+                              <AvatarFallback className='text-xs font-semibold'>{initials(displayName)}</AvatarFallback>
+                            </Avatar>
+                            <span className={online ? 'absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-background bg-emerald-400' : 'absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-background bg-rose-400'} />
+                          </div>
+                          <div>
+                            <p className='text-sm font-medium text-foreground'>{displayName}</p>
+                            <p className='text-xs text-muted-foreground'>{member.department ?? 'No department'}</p>
+                          </div>
+                        </div>
+                        <ChevronRight className='h-4 w-4 text-muted-foreground' />
+                      </button>
+                    )
+                  })}
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className='pb-3'><CardTitle>Upcoming Timeline</CardTitle></CardHeader>
+                <CardContent className='space-y-2'>
+                  {timelineEvents.length === 0 ? <p className='rounded-md border bg-muted/10 px-3 py-4 text-sm text-muted-foreground'>No upcoming events.</p> : timelineEvents.map((event) => (
+                    <article key={event.id} className='flex items-center justify-between rounded-md border bg-muted/10 px-3 py-2.5'>
+                      <div>
+                        <p className='text-sm font-medium text-foreground'>{event.title}</p>
+                        <p className='text-xs text-muted-foreground'>{event.event_type}</p>
+                      </div>
+                      <span className='inline-flex items-center gap-1.5 text-xs text-muted-foreground'><CalendarDays className='h-3.5 w-3.5' />{formatTimelineTime(event.starts_at)}</span>
+                    </article>
+                  ))}
+                </CardContent>
+              </Card>
+            </section>
+          </>
+        ) : null}
+
+        {activeSection === 'organization-settings' ? (
+          <Card>
+            <CardHeader><CardTitle>Organization Settings</CardTitle></CardHeader>
+            <CardContent className='grid gap-4 md:grid-cols-2'>
+              <div className='rounded-md border bg-muted/10 p-3'><p className='text-xs text-muted-foreground'>Organization Name</p><p className='mt-1 text-sm font-medium'>{currentOrganization.name}</p></div>
+              <div className='rounded-md border bg-muted/10 p-3'><p className='text-xs text-muted-foreground'>Plan</p><p className='mt-1 text-sm font-medium'>{currentOrganization.plan}</p></div>
+              <div className='rounded-md border bg-muted/10 p-3'><p className='text-xs text-muted-foreground'>Industry</p><p className='mt-1 text-sm font-medium'>{currentOrganization.industry || 'Not set'}</p></div>
+              <div className='rounded-md border bg-muted/10 p-3'><p className='text-xs text-muted-foreground'>Location</p><p className='mt-1 text-sm font-medium'>{currentOrganization.location || 'Not set'}</p></div>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {activeSection === 'departments' ? (
+          <Card>
+            <CardHeader>
+              <div className='flex items-center justify-between gap-2'>
+                <CardTitle>Departments</CardTitle>
+                <Button
+                  size='sm'
+                  onClick={() => setCreateDepartmentModalOpen(true)}
+                  disabled={!canManageDepartments}
+                  className='gap-1.5'
+                >
+                  Add department
+                  <CirclePlus className='h-4 w-4' />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className='space-y-4'>
+              {!canManageDepartments ? (
+                <p className='text-xs text-muted-foreground'>Only organization admins/owners can manage departments.</p>
+              ) : null}
+
+              {activeDepartmentRows.length === 0 ? (
+                <p className='rounded-md border bg-muted/10 px-3 py-4 text-sm text-muted-foreground'>No departments yet.</p>
+              ) : (
+                <div className='overflow-x-auto rounded-md border'>
+                  <table className='w-full min-w-[560px] text-sm'>
+                    <thead className='bg-muted/30 text-left text-xs uppercase tracking-wide text-muted-foreground'>
+                      <tr>
+                        <th className='px-3 py-2'>Department</th>
+                        <th className='px-3 py-2'>Active Users</th>
+                        <th className='px-3 py-2'>Total Users</th>
+                        <th className='px-3 py-2 text-right'>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeDepartmentRows.map((department) => {
+                        const usage = departmentMap.find((item) => item.name.toLowerCase() === department.name.toLowerCase())
+                        return (
+                          <tr key={department.id} className='border-t border-border/70'>
+                            <td className='px-3 py-2.5 font-medium'>{department.name}</td>
+                            <td className='px-3 py-2.5 text-muted-foreground'>{usage?.active ?? 0}</td>
+                            <td className='px-3 py-2.5 text-muted-foreground'>{usage?.count ?? 0}</td>
+                            <td className='px-3 py-2.5'>
+                              {canManageDepartments ? (
+                                <div className='flex justify-end gap-2'>
+                                  <Button
+                                    size='sm'
+                                    variant='outline'
+                                    onClick={() => {
+                                      setEditingDepartmentId(department.id)
+                                      setEditingDepartmentName(department.name)
+                                      setEditDepartmentModalOpen(true)
+                                    }}
+                                    disabled={departmentSavingId === department.id}
+                                    className='h-9 w-9 p-0'
+                                    aria-label={`Rename ${department.name}`}
+                                    title='Rename department'
+                                  >
+                                    <Pencil className='h-4 w-4' />
+                                  </Button>
+                                  <Button
+                                    size='sm'
+                                    variant='destructive'
+                                    onClick={() => void handleDeleteDepartment(department.id)}
+                                    disabled={departmentSavingId === department.id}
+                                    className='h-9 w-9 p-0'
+                                    aria-label={`Delete ${department.name}`}
+                                    title='Delete department'
+                                  >
+                                    <Trash2 className='h-4 w-4' />
+                                  </Button>
+                                </div>
+                              ) : null}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {activeSection === 'jobs' ? (
+          <Card>
+            <CardHeader>
+              <div className='flex items-center justify-between gap-2'>
+                <CardTitle>Jobs / Positions</CardTitle>
+                <Button
+                  size='sm'
+                  onClick={() => setCreateJobModalOpen(true)}
+                  disabled={!canManageDepartments || activeDepartmentRows.length === 0}
+                  className='gap-1.5'
+                >
+                  Add job
+                  <CirclePlus className='h-4 w-4' />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className='space-y-4'>
+              {activeJobRows.length === 0 ? (
+                <p className='rounded-md border bg-muted/10 px-3 py-4 text-sm text-muted-foreground'>No job positions yet.</p>
+              ) : (
+                <div className='overflow-x-auto rounded-md border'>
+                  <table className='w-full min-w-[680px] text-sm'>
+                    <thead className='bg-muted/30 text-left text-xs uppercase tracking-wide text-muted-foreground'>
+                      <tr>
+                        <th className='px-3 py-2'>Job</th>
+                        <th className='px-3 py-2'>Department</th>
+                        <th className='px-3 py-2'>Members</th>
+                        <th className='px-3 py-2 text-right'>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeJobRows.map((job) => {
+                        const department = activeDepartmentRows.find((item) => item.id === job.department_id)
+                        const linkedMembers = jobsMap.get(job.name)?.length ?? 0
+                        return (
+                          <tr key={job.id} className='border-t border-border/70'>
+                            <td className='px-3 py-2.5 font-medium'>{job.name}</td>
+                            <td className='px-3 py-2.5 text-muted-foreground'>{department?.name ?? 'No department'}</td>
+                            <td className='px-3 py-2.5 text-muted-foreground'>{linkedMembers}</td>
+                            <td className='px-3 py-2.5'>
+                              {canManageDepartments ? (
+                                <div className='flex justify-end gap-2'>
+                                  <Button
+                                    size='sm'
+                                    variant='outline'
+                                    className='h-9 w-9 p-0'
+                                    aria-label={`Edit ${job.name}`}
+                                    title='Edit job'
+                                    onClick={() => {
+                                      setEditingJobId(job.id)
+                                      setEditingJobName(job.name)
+                                      setEditingJobDepartmentId(job.department_id)
+                                      setEditJobModalOpen(true)
+                                    }}
+                                    disabled={jobSavingId === job.id}
+                                  >
+                                    <Pencil className='h-4 w-4' />
+                                  </Button>
+                                  <Button
+                                    size='sm'
+                                    variant='destructive'
+                                    className='h-9 w-9 p-0'
+                                    aria-label={`Delete ${job.name}`}
+                                    title='Delete job'
+                                    onClick={() => void handleDeleteJob(job.id)}
+                                    disabled={jobSavingId === job.id}
+                                  >
+                                    <Trash2 className='h-4 w-4' />
+                                  </Button>
+                                </div>
+                              ) : null}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {activeSection === 'roles-permissions' ? (
+          <Card>
+            <CardHeader><CardTitle>Roles & Permissions</CardTitle></CardHeader>
+            <CardContent className='space-y-3'>
+              {roleMap.map((role) => (
+                <div key={role.role} className='rounded-md border bg-muted/10 p-3'>
+                  <div className='flex items-center justify-between'>
+                    <p className='text-sm font-medium capitalize'>{role.role}</p>
+                    <Badge variant='outline'>{role.count} users</Badge>
+                  </div>
+                  <p className='mt-1 text-xs text-muted-foreground'>Permissions matrix configuration will be expanded in next steps.</p>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {activeSection === 'invitations' ? (
+          <Card>
+            <CardHeader>
+              <div className='flex flex-wrap items-center justify-between gap-3'>
+                <div>
+                  <CardTitle>Invitations & User Access</CardTitle>
+                  <p className='mt-1 text-xs text-muted-foreground'>Track invite lifecycle and add new organization users.</p>
+                </div>
+                <Button size='sm' className='gap-1.5' onClick={openInvitePeopleDialog} disabled={!canInviteUsers}>
+                  <UserPlus className='h-4 w-4' />
+                  Invite user
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {invitations.length === 0 ? (
+                <p className='rounded-md border bg-muted/10 px-3 py-4 text-sm text-muted-foreground'>No invitations yet.</p>
+              ) : (
+                <div className='overflow-x-auto rounded-md border'>
+                  <table className='w-full min-w-[760px] text-sm'>
+                    <thead className='bg-muted/30 text-left text-xs uppercase tracking-wide text-muted-foreground'>
+                      <tr>
+                        <th className='px-3 py-2'>Email</th>
+                        <th className='px-3 py-2'>Role</th>
+                        <th className='px-3 py-2'>Status</th>
+                        <th className='px-3 py-2'>Sent</th>
+                        <th className='px-3 py-2'>Expires</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {invitations.map((invite) => (
+                        <tr key={invite.id} className='border-t border-border/70'>
+                          <td className='px-3 py-2.5 font-medium text-foreground'>{invite.email}</td>
+                          <td className='px-3 py-2.5 capitalize text-muted-foreground'>{invite.role}</td>
+                          <td className='px-3 py-2.5'>
+                            <Badge variant='outline' className={invitationStatusClass(invite.status)}>
+                              {invite.status}
+                            </Badge>
+                          </td>
+                          <td className='px-3 py-2.5 text-muted-foreground'>{formatInvitationDate(invite.created_at)}</td>
+                          <td className='px-3 py-2.5 text-muted-foreground'>{formatInvitationDate(invite.expires_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {activeSection === 'audit-logs' ? (
+          <Card>
+            <CardHeader><CardTitle>Audit Logs</CardTitle></CardHeader>
+            <CardContent className='space-y-2'>
+              {timelineEvents.length === 0 ? <p className='rounded-md border bg-muted/10 px-3 py-4 text-sm text-muted-foreground'>No audit events in the current window.</p> : timelineEvents.map((event) => (
+                <div key={event.id} className='rounded-md border bg-muted/10 px-3 py-2.5'>
+                  <p className='text-sm font-medium'>{event.title}</p>
+                  <p className='text-xs text-muted-foreground'>{event.event_type} • {formatTimelineTime(event.starts_at)}</p>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {activeSection === 'notification-settings' ? (
+          <Card>
+            <CardHeader><CardTitle>Notification Settings</CardTitle></CardHeader>
+            <CardContent className='grid gap-3 md:grid-cols-2'>
+              <div className='rounded-md border bg-muted/10 p-3'><p className='text-sm font-medium'>Organization Alerts</p><p className='text-xs text-muted-foreground mt-1'>Control defaults for task, mention, and update notifications.</p></div>
+              <div className='rounded-md border bg-muted/10 p-3'><p className='text-sm font-medium'>Delivery Channels</p><p className='text-xs text-muted-foreground mt-1'>Email, in-app, and escalation preferences will be managed here.</p></div>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {!V1_LIVE_SECTIONS.has(activeSection) ? (
+          <Card>
+            <CardHeader><CardTitle>{selectedSectionMeta.label}</CardTitle></CardHeader>
+            <CardContent>
+              <div className='rounded-md border border-dashed bg-muted/10 p-4'>
+                <p className='text-sm font-medium'>Coming soon</p>
+                <p className='mt-1 text-xs text-muted-foreground'>This section is part of the organization architecture and will be implemented in the next steps.</p>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+      </div>
 
       <MemberDetailsDialog
         member={selectedMember}
@@ -1047,7 +2150,155 @@ export function WorkspacePage() {
         }}
         onSave={handleSaveMember}
         onChangeAccountStatus={handleChangeMemberAccountStatus}
+        departmentOptions={departmentOptions}
+        jobsByDepartment={jobsByDepartment}
+        onRequestCreateDepartment={() => setCreateDepartmentModalOpen(true)}
+        onRequestCreateJob={(departmentName) => {
+          if (departmentName) {
+            const match = activeDepartmentRows.find((department) => department.name === departmentName)
+            setNewJobDepartmentId(match?.id ?? '')
+          } else {
+            setNewJobDepartmentId('')
+          }
+          setCreateJobModalOpen(true)
+        }}
       />
+
+      <Dialog open={createDepartmentModalOpen} onOpenChange={setCreateDepartmentModalOpen}>
+        <DialogContent className='max-w-md'>
+          <DialogHeader>
+            <DialogTitle>Create department</DialogTitle>
+            <DialogDescription>Add a department for this organization.</DialogDescription>
+          </DialogHeader>
+          <div className='space-y-2 pb-5'>
+            <label className='text-sm font-medium'>Department name</label>
+            <Input
+              value={newDepartmentName}
+              onChange={(event) => setNewDepartmentName(event.target.value)}
+              placeholder='e.g. Finance'
+              disabled={creatingDepartment}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant='outline' onClick={() => setCreateDepartmentModalOpen(false)} disabled={creatingDepartment}>Cancel</Button>
+            <Button onClick={() => void handleCreateDepartment()} disabled={creatingDepartment || !newDepartmentName.trim()}>
+              {creatingDepartment ? 'Creating...' : 'Create'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editDepartmentModalOpen} onOpenChange={setEditDepartmentModalOpen}>
+        <DialogContent className='max-w-md'>
+          <DialogHeader>
+            <DialogTitle>Rename department</DialogTitle>
+            <DialogDescription>Update the department name.</DialogDescription>
+          </DialogHeader>
+          <div className='space-y-2 pb-5'>
+            <label className='text-sm font-medium'>Department name</label>
+            <Input
+              value={editingDepartmentName}
+              onChange={(event) => setEditingDepartmentName(event.target.value)}
+              disabled={Boolean(departmentSavingId)}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant='outline'
+              onClick={() => {
+                setEditDepartmentModalOpen(false)
+                setEditingDepartmentId(null)
+                setEditingDepartmentName('')
+              }}
+              disabled={Boolean(departmentSavingId)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => editingDepartmentId && void handleRenameDepartment(editingDepartmentId)}
+              disabled={Boolean(departmentSavingId) || !editingDepartmentId || !editingDepartmentName.trim()}
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={createJobModalOpen} onOpenChange={setCreateJobModalOpen}>
+        <DialogContent className='max-w-md'>
+          <DialogHeader>
+            <DialogTitle>Create job</DialogTitle>
+            <DialogDescription>Add a job linked to a department.</DialogDescription>
+          </DialogHeader>
+          <div className='space-y-3 pb-5'>
+            <div className='space-y-2'>
+              <label className='text-sm font-medium'>Department</label>
+              <DepartmentSelectPopover
+                value={newJobDepartmentId}
+                disabled={creatingJob}
+                departments={activeDepartmentRows}
+                onChange={setNewJobDepartmentId}
+                onAddDepartment={() => setCreateDepartmentModalOpen(true)}
+              />
+            </div>
+            <div className='space-y-2'>
+              <label className='text-sm font-medium'>Job name</label>
+              <Input value={newJobName} onChange={(event) => setNewJobName(event.target.value)} disabled={creatingJob} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant='outline' onClick={() => setCreateJobModalOpen(false)} disabled={creatingJob}>Cancel</Button>
+            <Button onClick={() => void handleCreateJob()} disabled={creatingJob || !newJobName.trim() || !newJobDepartmentId}>
+              {creatingJob ? 'Creating...' : 'Create'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editJobModalOpen} onOpenChange={setEditJobModalOpen}>
+        <DialogContent className='max-w-md'>
+          <DialogHeader>
+            <DialogTitle>Edit job</DialogTitle>
+            <DialogDescription>Update job name and department.</DialogDescription>
+          </DialogHeader>
+          <div className='space-y-3 pb-5'>
+            <div className='space-y-2'>
+              <label className='text-sm font-medium'>Department</label>
+              <DepartmentSelectPopover
+                value={editingJobDepartmentId}
+                disabled={Boolean(jobSavingId)}
+                departments={activeDepartmentRows}
+                onChange={setEditingJobDepartmentId}
+                onAddDepartment={() => setCreateDepartmentModalOpen(true)}
+              />
+            </div>
+            <div className='space-y-2'>
+              <label className='text-sm font-medium'>Job name</label>
+              <Input value={editingJobName} onChange={(event) => setEditingJobName(event.target.value)} disabled={Boolean(jobSavingId)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant='outline'
+              onClick={() => {
+                setEditJobModalOpen(false)
+                setEditingJobId(null)
+                setEditingJobName('')
+                setEditingJobDepartmentId('')
+              }}
+              disabled={Boolean(jobSavingId)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => editingJobId && void handleUpdateJob(editingJobId)}
+              disabled={Boolean(jobSavingId) || !editingJobId || !editingJobName.trim() || !editingJobDepartmentId}
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -28,7 +28,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? D
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? ''
 const RESEND_FROM_EMAIL = Deno.env.get('RESEND_FROM_EMAIL') ?? ''
 const APP_BASE_URL = Deno.env.get('APP_BASE_URL') ?? ''
-const FALLBACK_APP_BASE_URL = 'https://spryartech.cloudninetech.co.za'
+const FALLBACK_APP_BASE_URL = 'https://cloudninetech.co.za'
 const BRAND_LOGO_URL = 'https://pub-7d1e5686dccc4c4b82b655d5aed298ae.r2.dev/images/Spryar_Tech.png'
 
 function decodeBase64Url(value: string) {
@@ -114,9 +114,9 @@ function bodyForType(
   const footerText =
     type === 'mention'
       ? contextKind === 'chat'
-        ? 'This notification was sent by Spryar Tech because a group chat mention requires your attention.'
-        : 'This notification was sent by Spryar Tech because a task update requires your attention.'
-      : 'This notification was sent by Spryar Tech because a new task was assigned to you.'
+        ? 'This notification was sent by CloudNine ERP because a group chat mention requires your attention.'
+        : 'This notification was sent by CloudNine ERP because a task update requires your attention.'
+      : 'This notification was sent by CloudNine ERP because a new task was assigned to you.'
 
   return `
 <!DOCTYPE html>
@@ -128,7 +128,7 @@ function bodyForType(
         <table width="100%" style="max-width:600px;background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;">
           <tr>
             <td style="padding:28px;border-bottom:1px solid #e2e8f0;text-align:center;">
-              <img src="${BRAND_LOGO_URL}" alt="Spryar Tech" style="height:42px;">
+              <img src="${BRAND_LOGO_URL}" alt="CloudNine ERP" style="height:42px;">
             </td>
           </tr>
           <tr>
@@ -141,8 +141,8 @@ function bodyForType(
           ${messageBlock}
           <tr>
             <td style="padding:8px 28px;">
-              <a href="${safeAppUrl}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#fdbe13;color:#111827;text-decoration:none;font-size:14px;font-weight:700;">
-                Open Spryar Tech
+              <a href="${safeAppUrl}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#1a8fe3;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;">
+                Open CloudNine ERP
               </a>
             </td>
           </tr>

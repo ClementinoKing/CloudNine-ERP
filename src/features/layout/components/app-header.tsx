@@ -597,6 +597,19 @@ export function AppHeader({
   }, [openCreateProjectModal])
 
   useEffect(() => {
+    const handleOpenCreateTask = () => setCreateTaskOpen(true)
+    const handleOpenInvitePeople = () => setInviteOpen(true)
+
+    window.addEventListener('contas:open-create-task', handleOpenCreateTask as EventListener)
+    window.addEventListener('contas:open-invite-people', handleOpenInvitePeople as EventListener)
+
+    return () => {
+      window.removeEventListener('contas:open-create-task', handleOpenCreateTask as EventListener)
+      window.removeEventListener('contas:open-invite-people', handleOpenInvitePeople as EventListener)
+    }
+  }, [])
+
+  useEffect(() => {
     const onRealtimeChange = (event: Event) => {
       const detail = (event as CustomEvent<{ table?: string }>).detail
       if (detail?.table !== 'notifications') return

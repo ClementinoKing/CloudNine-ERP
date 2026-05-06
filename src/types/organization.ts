@@ -16,3 +16,12 @@ export interface Workspace {
   id: string
   name: string
 }
+
+export type OrganizationMemberRole = 'owner' | 'admin' | 'member' | 'viewer'
+
+export interface OrganizationMember {
+  id: string
+  organizationId: string
+  userId: string
+  role: OrganizationMemberRole
+}

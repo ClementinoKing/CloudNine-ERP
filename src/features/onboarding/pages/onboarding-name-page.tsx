@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/features/auth/context/auth-context'
 import { uploadAvatarToR2 } from '@/lib/r2'
+import { supabase } from '@/lib/supabase'
+import { notify } from '@/lib/notify'
 
 import { OnboardingShell } from '../components/onboarding-shell'
 
@@ -23,8 +25,22 @@ function generateUsernameCandidate(name: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '')
     .replace(/^_+|_+$/g, '')
-
   return base || 'user'
+}
+
+async function resolveOrganizationIdForProfile(userId: string, onboardingOrganizationId?: string) {
+  if (onboardingOrganizationId) return onboardingOrganizationId
+
+  const { data, error } = await supabase
+    .from('organizations')
+    .select('id')
+    .eq('created_by', userId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) throw error
+  return data?.id ?? null
 }
 
 export function OnboardingNamePage() {
@@ -32,6 +48,7 @@ export function OnboardingNamePage() {
   const { currentUser, updateCurrentUser, updateOnboarding } = useAuth()
   const [fullName, setFullName] = useState(currentUser?.onboarding?.fullName || currentUser?.name || '')
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [avatarError, setAvatarError] = useState<string | null>(null)
   const avatarInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -60,15 +77,53 @@ export function OnboardingNamePage() {
     }
   }
 
+  const handleContinue = async () => {
+    if (!canContinue || !currentUser?.id) return
+
+    const nextName = fullName.trim()
+    const username = generateUsernameCandidate(nextName)
+    const onboardingOrganizationId = currentUser.onboarding?.organizationId
+
+    setSaving(true)
+    try {
+      const organizationId = await resolveOrganizationIdForProfile(currentUser.id, onboardingOrganizationId)
+
+      // Create the profile row linked to the organization
+      const { error } = await supabase.from('profiles').upsert({
+        id: currentUser.id,
+        full_name: nextName,
+        username,
+        email: currentUser.email,
+        organization_id: organizationId ?? null,
+        avatar_url: currentUser.avatarUrl ?? currentUser.avatarPath ?? null,
+        role_label: 'owner',
+      })
+
+      if (error) throw error
+
+      updateCurrentUser({ name: nextName, username })
+      updateOnboarding({ fullName: nextName, currentStep: 'work' })
+      navigate('/onboarding/work')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save profile'
+      notify.error('Profile setup failed', { description: message })
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <OnboardingShell
-      title='Welcome to Spryar Tech'
-      subtitle={`You're signing up as ${currentUser?.email ?? 'your account'}`}
+      title='Set up your profile'
+      subtitle={`You're joining as ${currentUser?.email ?? 'your account'}. Add your name and photo.`}
+      backTo='/onboarding/organization'
     >
       <div className='space-y-6'>
         <div className='flex items-center gap-4'>
           <Avatar className='h-16 w-16 border'>
-            {currentUser?.avatarUrl ? <AvatarImage src={currentUser.avatarUrl} alt={currentUser.name} className='object-cover' /> : null}
+            {currentUser?.avatarUrl ? (
+              <AvatarImage src={currentUser.avatarUrl} alt={currentUser.name} className='object-cover' />
+            ) : null}
             <AvatarFallback className='text-sm font-semibold'>
               {initials(fullName || currentUser?.name || 'User')}
             </AvatarFallback>
@@ -81,11 +136,19 @@ export function OnboardingNamePage() {
               onChange={(event) => void handleAvatarFile(event)}
               className='hidden'
             />
-            <Button variant='outline' size='sm' onClick={() => avatarInputRef.current?.click()} className='gap-1.5' disabled={uploadingAvatar}>
+            <Button
+              variant='outline'
+              size='sm'
+              onClick={() => avatarInputRef.current?.click()}
+              className='gap-1.5'
+              disabled={uploadingAvatar}
+            >
               <Camera className='h-4 w-4' />
               {uploadingAvatar ? 'Uploading...' : hasPhoto ? 'Change photo' : 'Add photo'}
             </Button>
-            {!hasPhoto ? <p className='mt-2 text-xs text-muted-foreground'>Adding a profile photo is optional.</p> : null}
+            {!hasPhoto ? (
+              <p className='mt-2 text-xs text-muted-foreground'>Adding a profile photo is optional.</p>
+            ) : null}
             {avatarError ? <p className='mt-2 text-xs text-destructive'>{avatarError}</p> : null}
           </div>
         </div>
@@ -101,7 +164,9 @@ export function OnboardingNamePage() {
             placeholder='Enter your full name'
             autoFocus
           />
-          {fullName.trim().length < 2 ? <p className='text-xs text-muted-foreground'>Enter your full name to continue.</p> : null}
+          {fullName.trim().length < 2 ? (
+            <p className='text-xs text-muted-foreground'>Enter your full name to continue.</p>
+          ) : null}
         </div>
 
         <div className='space-y-2'>
@@ -112,20 +177,9 @@ export function OnboardingNamePage() {
           <p className='text-xs text-muted-foreground'>Generated automatically from your name.</p>
         </div>
 
-        <Button
-          className='w-full'
-          disabled={!canContinue}
-          onClick={() => {
-            const nextName = fullName.trim()
-            updateCurrentUser({ name: nextName, username: generateUsernameCandidate(nextName) })
-            updateOnboarding({ fullName: nextName, currentStep: 'work' })
-            navigate('/onboarding/work')
-          }}
-        >
-          Continue
+        <Button className='w-full' disabled={!canContinue || saving || uploadingAvatar} onClick={handleContinue}>
+          {saving ? 'Saving...' : 'Continue'}
         </Button>
-
-        <p className='text-xs text-muted-foreground'>Free trial includes all core features for your organization setup.</p>
       </div>
     </OnboardingShell>
   )

@@ -52,7 +52,7 @@ function OfflineConnectionPage() {
         <p className='text-xs font-semibold uppercase tracking-wide text-muted-foreground'>Connection</p>
         <h1 className='mt-2 text-2xl font-semibold text-foreground'>No network connection</h1>
         <p className='mt-2 text-sm text-muted-foreground'>
-          You are offline right now. Reconnect to the internet to continue using Spryar Tech.
+          You are offline right now. Reconnect to the internet to continue using CloudNine ERP.
         </p>
         <button
           type='button'
