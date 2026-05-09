@@ -1,0 +1,1 @@
+import e from"./__vite-browser-external-CIEyP2s7.js";const o=e.promisify(e.readFile),t=e.promisify(e.writeFile),c=i=>e.promisify(e.unlink)(i).catch(()=>{});export{c as deleteCache,o as readCache,t as writeCache};
