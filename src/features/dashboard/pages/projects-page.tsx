@@ -84,9 +84,9 @@ const STATUS_TONE: Record<string, string> = {
   completed: 'border-emerald-400/35 bg-emerald-500/10 text-emerald-400',
 }
 
-const PROJECTS_CACHE_KEY = 'contas.projects.page.v1'
+const PROJECTS_CACHE_KEY = 'cloudnine.projects.page.v1'
 const PROJECTS_CACHE_TTL_MS = 3 * 60 * 1000
-const PROJECT_VIEW_STORAGE_KEY = 'contas.projects.view.v1'
+const PROJECT_VIEW_STORAGE_KEY = 'cloudnine.projects.view.v1'
 const PROJECTS_LIST_PAGE_SIZE = 8
 
 type ProjectViewMode = 'cards' | 'list'
@@ -316,13 +316,13 @@ export function ProjectsPage() {
     const onProjectCreated = () => {
       void loadProjects()
     }
-    window.addEventListener('contas:realtime-change', onRealtimeChange as EventListener)
-    window.addEventListener('contas:project-created', onProjectCreated as EventListener)
+    window.addEventListener('cloudnine:realtime-change', onRealtimeChange as EventListener)
+    window.addEventListener('cloudnine:project-created', onProjectCreated as EventListener)
 
     return () => {
       cancelled = true
-      window.removeEventListener('contas:realtime-change', onRealtimeChange as EventListener)
-      window.removeEventListener('contas:project-created', onProjectCreated as EventListener)
+      window.removeEventListener('cloudnine:realtime-change', onRealtimeChange as EventListener)
+      window.removeEventListener('cloudnine:project-created', onProjectCreated as EventListener)
     }
   }, [])
 
@@ -508,7 +508,7 @@ export function ProjectsPage() {
     )
     setEditProjectSubmitting(false)
     setEditProjectOpen(false)
-    window.dispatchEvent(new CustomEvent('contas:realtime-change', { detail: { table: 'projects', eventType: 'manual' } }))
+    window.dispatchEvent(new CustomEvent('cloudnine:realtime-change', { detail: { table: 'projects', eventType: 'manual' } }))
   }
 
   const renderProjectActions = (card: ProjectCard) => (
@@ -731,7 +731,7 @@ export function ProjectsPage() {
             <Button
               className='h-10 gap-2 px-4'
               onClick={() => {
-                window.dispatchEvent(new CustomEvent('contas:open-create-project'))
+                window.dispatchEvent(new CustomEvent('cloudnine:open-create-project'))
               }}
             >
               <Plus className='h-4 w-4' />

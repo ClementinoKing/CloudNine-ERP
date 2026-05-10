@@ -28,33 +28,11 @@ const INDUSTRY_OPTIONS = [
   'Other',
 ] as const
 
-function generateSlug(name: string): string {
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 50)
-}
-
-function appendSlugSuffix(baseSlug: string): string {
-  const suffix = crypto.randomUUID().slice(0, 6).toLowerCase()
-  const trimmedBase = baseSlug.slice(0, Math.max(1, 50 - (suffix.length + 1)))
-  return `${trimmedBase}-${suffix}`
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false
-  const maybeCode = 'code' in error ? String(error.code ?? '') : ''
-  const maybeMessage = 'message' in error ? String(error.message ?? '') : ''
-  return maybeCode === '23505' || maybeMessage.toLowerCase().includes('duplicate key')
-}
-
-function isForeignKeyViolation(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false
-  const maybeCode = 'code' in error ? String(error.code ?? '') : ''
-  const maybeMessage = 'message' in error ? String(error.message ?? '').toLowerCase() : ''
-  return maybeCode === '23503' || maybeMessage.includes('foreign key')
+type OnboardingOrganization = {
+  id: string
+  name: string
+  slug: string
+  industry: string
 }
 
 export function OnboardingOrganizationPage() {
@@ -71,51 +49,23 @@ export function OnboardingOrganizationPage() {
 
     setCreating(true)
     try {
-      const organizationId = crypto.randomUUID()
       const trimmedName = organizationName.trim()
-      const baseSlug = generateSlug(trimmedName)
-      let lastError: unknown = null
-      let created = false
-
-      // Some environments still enforce organizations.created_by -> profiles(id),
-      // so make sure the self profile row exists before org creation.
-      const { error: profileError } = await supabase.from('profiles').upsert({
-        id: currentUser.id,
-        email: currentUser.email,
+      const { data, error } = await supabase.rpc('create_onboarding_organization', {
+        p_name: trimmedName,
+        p_industry: industry,
+        p_plan: 'Enterprise',
       })
-      if (profileError) throw profileError
 
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        const slug = attempt === 0 ? baseSlug : appendSlugSuffix(baseSlug)
+      if (error) throw error
 
-        // Create the organization. The database trigger assigns the owner membership.
-        const { error: orgError } = await supabase
-          .from('organizations')
-          .insert({
-            id: organizationId,
-            name: trimmedName,
-            slug,
-            plan: 'Enterprise',
-            industry,
-            created_by: currentUser.id,
-          })
-
-        if (!orgError) {
-          created = true
-          break
-        }
-
-        lastError = orgError
-        if (!isUniqueViolation(orgError) && !isForeignKeyViolation(orgError)) break
-      }
-
-      if (!created) throw lastError ?? new Error('Failed to create organization')
+      const organization = Array.isArray(data) ? (data[0] as OnboardingOrganization | undefined) : undefined
+      if (!organization?.id) throw new Error('Organization was not created. Please try again.')
 
       // Store org ID in onboarding state so the profile step can link to it
       updateOnboarding({
-        organizationId,
-        organizationName: trimmedName,
-        organizationIndustry: industry,
+        organizationId: organization.id,
+        organizationName: organization.name,
+        organizationIndustry: organization.industry,
         currentStep: 'name',
       })
       navigate('/onboarding/name')

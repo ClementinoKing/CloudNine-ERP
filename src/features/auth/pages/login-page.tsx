@@ -13,8 +13,9 @@ import { notify } from '@/lib/notify'
 import { useAuth } from '../context/auth-context'
 import { AuthInputGroup } from '../components/auth-input-group'
 import { AuthLayout } from '../components/auth-layout'
+import { SocialAuthButtons } from '../components/social-auth-buttons'
 
-const LAST_DASHBOARD_PATH_KEY = 'contas.last-dashboard-path'
+const LAST_DASHBOARD_PATH_KEY = 'cloudnine.last-dashboard-path'
 
 const loginSchema = z.object({
   email: z.email('Enter a valid email address'),
@@ -78,12 +79,21 @@ export function LoginPage() {
           <p className='mt-1 text-muted-foreground'>{accessNotice}</p>
         </div>
       ) : null}
-      <form className='space-y-4' onSubmit={handleSubmit(onSubmit)}>
+      <form className='space-y-3' onSubmit={handleSubmit(onSubmit)}>
         <AuthInputGroup label='Email' htmlFor='email' error={errors.email?.message}>
           <Input id='email' type='email' autoComplete='email' placeholder='name@company.com' {...register('email')} />
         </AuthInputGroup>
 
-        <AuthInputGroup label='Password' htmlFor='password' error={errors.password?.message}>
+        <AuthInputGroup
+          label='Password'
+          htmlFor='password'
+          error={errors.password?.message}
+          action={
+            <Link className='text-xs font-medium text-primary hover:underline' to='/forgot-password'>
+              Forgot password?
+            </Link>
+          }
+        >
           <div className='relative'>
             <Input
               id='password'
@@ -113,7 +123,11 @@ export function LoginPage() {
         </Button>
       </form>
 
-      <p className='mt-6 text-sm text-muted-foreground'>
+      <div className='mt-5'>
+        <SocialAuthButtons intent='signin' disabled={submitting} />
+      </div>
+
+      <p className='mt-5 text-sm text-muted-foreground'>
         Do not have an account?{' '}
         <Link className='font-medium text-primary hover:underline' to='/register'>
           Create one

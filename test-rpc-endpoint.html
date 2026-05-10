@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test RPC Endpoint</title>
+</head>
+<body>
+    <h1>Test create_task_with_recurrence Endpoint</h1>
+    <button id="testBtn">Test Endpoint (No Cache)</button>
+    <pre id="result"></pre>
+
+    <script>
+        document.getElementById('testBtn').addEventListener('click', async () => {
+            const resultEl = document.getElementById('result');
+            resultEl.textContent = 'Testing...';
+            
+            try {
+                const response = await fetch('https://fqyybbrgeeugbwunxvfs.supabase.co/rest/v1/rpc/create_task_with_recurrence', {
+                    method: 'POST',
+                    headers: {
+                        'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZxeXliYnJnZWV1Z2J3dW54dmZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2NDEwODEsImV4cCI6MjA5MzIxNzA4MX0.LwOpBB_AU-EMQNkQdc9C0z_Xz3XO7dxcRzgEkSMCdRM',
+                        'Content-Type': 'application/json',
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache'
+                    },
+                    cache: 'no-store',
+                    body: JSON.stringify({
+                        p_title: 'test',
+                        p_organization_id: '00000000-0000-0000-0000-000000000000'
+                    })
+                });
+                
+                const data = await response.json();
+                resultEl.textContent = `Status: ${response.status}\n\n${JSON.stringify(data, null, 2)}`;
+                
+                if (response.status === 403) {
+                    resultEl.textContent += '\n\n✅ SUCCESS! Endpoint exists (403 = auth required, not 404)';
+                } else if (response.status === 404) {
+                    resultEl.textContent += '\n\n❌ Still getting 404 - browser cache issue';
+                }
+            } catch (error) {
+                resultEl.textContent = `Error: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html>

@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 
 type NotificationType = 'mention' | 'task' | 'system'
 type NotificationFilter = 'all' | 'unread' | 'mentions' | 'system'
-const NOTIFICATIONS_CACHE_KEY = 'contas.notifications.cache.v1'
+const NOTIFICATIONS_CACHE_KEY = 'cloudnine.notifications.cache.v1'
 
 type NotificationItem = {
   id: string
@@ -140,11 +140,11 @@ export function NotificationsPage() {
       if (detail?.table !== 'notifications') return
       void fetchNotifications()
     }
-    window.addEventListener('contas:realtime-change', onRealtimeChange as EventListener)
+    window.addEventListener('cloudnine:realtime-change', onRealtimeChange as EventListener)
 
     return () => {
       cancelled = true
-      window.removeEventListener('contas:realtime-change', onRealtimeChange as EventListener)
+      window.removeEventListener('cloudnine:realtime-change', onRealtimeChange as EventListener)
     }
   }, [currentUser?.id])
 

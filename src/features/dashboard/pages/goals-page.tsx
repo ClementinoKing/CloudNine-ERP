@@ -120,8 +120,8 @@ type GoalStatePayload = {
   tasks: TaskRow[]
 }
 
-const GOALS_CACHE_KEY = 'contas.goals.page.v1'
-const GOALS_ONBOARDING_KEY = 'contas.goals.onboarding.completed.v1'
+const GOALS_CACHE_KEY = 'cloudnine.goals.page.v1'
+const GOALS_ONBOARDING_KEY = 'cloudnine.goals.onboarding.completed.v1'
 const TOUR_DEMO_GOAL_ID = '__goals-tour-demo-goal__'
 
 const GOALS_ONBOARDING_STEPS = [
@@ -527,9 +527,9 @@ export function GoalsPage() {
       void load()
     }
 
-    window.addEventListener('contas:realtime-change', onRealtimeChange as EventListener)
+    window.addEventListener('cloudnine:realtime-change', onRealtimeChange as EventListener)
     return () => {
-      window.removeEventListener('contas:realtime-change', onRealtimeChange as EventListener)
+      window.removeEventListener('cloudnine:realtime-change', onRealtimeChange as EventListener)
     }
   }, [])
 
@@ -1309,7 +1309,7 @@ export function GoalsPage() {
                   size='sm'
                   variant='outline'
                   className='h-11 rounded-xl border-white/10 bg-background/50 px-4'
-                  onClick={() => window.dispatchEvent(new CustomEvent('contas:realtime-change', { detail: { table: 'goals', eventType: 'manual' } }))}
+                  onClick={() => window.dispatchEvent(new CustomEvent('cloudnine:realtime-change', { detail: { table: 'goals', eventType: 'manual' } }))}
                 >
                   <RefreshCw className='mr-1.5 h-4 w-4' />
                   Sync

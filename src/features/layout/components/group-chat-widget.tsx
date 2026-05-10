@@ -216,7 +216,7 @@ const CHAT_ATTACHMENT_ALLOWED_MIME_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   'application/vnd.oasis.opendocument.presentation',
 ])
-const CHAT_CACHE_KEY = 'contas.group-chat.cache.v1'
+const CHAT_CACHE_KEY = 'cloudnine.group-chat.cache.v1'
 const CHAT_CACHE_MAX_AGE_MS = 10 * 60 * 1000
 const CHAT_TYPING_STATE_TTL_MS = 12_000
 const CHAT_TYPING_START_DELAY_MS = 350
@@ -1091,7 +1091,7 @@ function MessageBubble({
 
 export function GroupChatWidget() {
   const { currentUser, session } = useAuth()
-  const { currentOrganizationId } = useOrganization()
+  const { currentMembership, currentOrganizationId } = useOrganization()
   const location = useLocation()
   const [open, setOpen] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -1202,7 +1202,21 @@ export function GroupChatWidget() {
   }, [mentionDraft, mentionOptions])
 
   const resolveOrganizationRoom = useCallback(async () => {
-    if (!currentUser?.id || !currentOrganizationId) return null
+    if (!currentUser?.id || !currentOrganizationId || !currentMembership) return null
+
+    const ensuredRoomResult = await supabase.rpc('ensure_organization_group_chat_room', {
+      p_organization_id: currentOrganizationId,
+    })
+
+    if (!ensuredRoomResult.error) {
+      const ensuredRoom = Array.isArray(ensuredRoomResult.data)
+        ? (ensuredRoomResult.data[0] as ChatRoomRow | undefined)
+        : null
+
+      if (ensuredRoom?.id) return ensuredRoom
+    } else {
+      console.error('Failed to ensure organization group chat room', ensuredRoomResult.error)
+    }
 
     const roomResult = await supabase
       .from('chat_rooms')
@@ -1239,7 +1253,7 @@ export function GroupChatWidget() {
     }
 
     return (createResult.data ?? null) as ChatRoomRow | null
-  }, [currentOrganizationId, currentUser?.id])
+  }, [currentMembership, currentOrganizationId, currentUser?.id])
 
   useEffect(() => {
     if (!currentUser?.id || !currentOrganizationId) {
@@ -1314,12 +1328,12 @@ export function GroupChatWidget() {
       void loadUnreadMessageCount()
     }, 15000)
 
-    window.addEventListener('contas:realtime-change', handleRealtimeChange as EventListener)
+    window.addEventListener('cloudnine:realtime-change', handleRealtimeChange as EventListener)
 
     return () => {
       cancelled = true
       window.clearInterval(pollId)
-      window.removeEventListener('contas:realtime-change', handleRealtimeChange as EventListener)
+      window.removeEventListener('cloudnine:realtime-change', handleRealtimeChange as EventListener)
     }
   }, [currentOrganizationId, currentUser?.id, resolveOrganizationRoom])
 

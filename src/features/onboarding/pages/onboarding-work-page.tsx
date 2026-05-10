@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/features/auth/context/auth-context'
+import { notify } from '@/lib/notify'
+import { supabase } from '@/lib/supabase'
 
 import { OnboardingShell } from '../components/onboarding-shell'
 
@@ -53,8 +55,37 @@ export function OnboardingWorkPage() {
   const [role, setRole] = useState(currentUser?.onboarding?.role ?? '')
   const [workFunction, setWorkFunction] = useState(currentUser?.onboarding?.workFunction ?? '')
   const [useCase, setUseCase] = useState(currentUser?.onboarding?.useCase ?? '')
+  const [saving, setSaving] = useState(false)
 
   const canContinue = Boolean(role && workFunction && useCase)
+
+  const handleContinue = async () => {
+    if (!canContinue || !currentUser?.id) return
+
+    setSaving(true)
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          onboarding_completed: false,
+          onboarding_step: 'tools',
+          onboarding_role: role,
+          onboarding_work_function: workFunction,
+          onboarding_use_case: useCase,
+        })
+        .eq('id', currentUser.id)
+
+      if (error) throw error
+
+      updateOnboarding({ role, workFunction, useCase, currentStep: 'tools' })
+      navigate('/onboarding/tools')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save onboarding progress'
+      notify.error('Could not save progress', { description: message })
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <OnboardingShell
@@ -113,13 +144,10 @@ export function OnboardingWorkPage() {
 
         <Button
           className='mt-2 w-full'
-          disabled={!canContinue}
-          onClick={() => {
-            updateOnboarding({ role, workFunction, useCase, currentStep: 'tools' })
-            navigate('/onboarding/tools')
-          }}
+          disabled={!canContinue || saving}
+          onClick={() => void handleContinue()}
         >
-          Continue
+          {saving ? 'Saving...' : 'Continue'}
         </Button>
       </div>
     </OnboardingShell>

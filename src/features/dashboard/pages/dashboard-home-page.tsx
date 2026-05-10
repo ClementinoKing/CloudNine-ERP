@@ -37,7 +37,7 @@ type DashboardTask = {
   createdAt: string
 }
 type DashboardProject = { id: string; name: string; color: string }
-type DashboardQuickActionEvent = 'contas:open-create-task' | 'contas:open-create-project' | 'contas:open-invite-people'
+type DashboardQuickActionEvent = 'cloudnine:open-create-task' | 'cloudnine:open-create-project' | 'cloudnine:open-invite-people'
 type DashboardQuickAction = {
   id: string
   title: string
@@ -52,7 +52,7 @@ type DashboardCachePayload = {
   cachedAt: string
 }
 
-const DASHBOARD_HOME_CACHE_KEY_PREFIX = 'contas.dashboard.home.cache.v1'
+const DASHBOARD_HOME_CACHE_KEY_PREFIX = 'cloudnine.dashboard.home.cache.v1'
 
 const TREND_RANGE_OPTIONS: Array<{ key: TrendRange; label: string; days: number }> = [
   { key: '7d', label: '7D', days: 7 },
@@ -269,7 +269,7 @@ export function DashboardHomePage() {
         description: 'Capture a task, owner, priority, and due date.',
         icon: CheckSquare,
         tone: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600',
-        onSelect: () => dispatchDashboardQuickAction('contas:open-create-task'),
+        onSelect: () => dispatchDashboardQuickAction('cloudnine:open-create-task'),
       },
       {
         id: 'create-project',
@@ -277,7 +277,7 @@ export function DashboardHomePage() {
         description: 'Start a project workspace with owner and timeline.',
         icon: FolderPlus,
         tone: 'border-sky-500/20 bg-sky-500/10 text-sky-600',
-        onSelect: () => dispatchDashboardQuickAction('contas:open-create-project'),
+        onSelect: () => dispatchDashboardQuickAction('cloudnine:open-create-project'),
       },
       {
         id: 'invite-teammate',
@@ -285,7 +285,7 @@ export function DashboardHomePage() {
         description: 'Add someone to the organization and active work.',
         icon: UserPlus,
         tone: 'border-violet-500/20 bg-violet-500/10 text-violet-600',
-        onSelect: () => dispatchDashboardQuickAction('contas:open-invite-people'),
+        onSelect: () => dispatchDashboardQuickAction('cloudnine:open-invite-people'),
       },
       {
         id: 'my-tasks',
@@ -384,11 +384,11 @@ export function DashboardHomePage() {
       if (!detail?.table || !['tasks', 'task_assignees', 'projects', 'profiles'].includes(detail.table)) return
       void loadDashboard()
     }
-    window.addEventListener('contas:realtime-change', onRealtimeChange as EventListener)
+    window.addEventListener('cloudnine:realtime-change', onRealtimeChange as EventListener)
 
     return () => {
       cancelled = true
-      window.removeEventListener('contas:realtime-change', onRealtimeChange as EventListener)
+      window.removeEventListener('cloudnine:realtime-change', onRealtimeChange as EventListener)
     }
   }, [cacheKey])
 

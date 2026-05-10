@@ -165,7 +165,7 @@ type ReportingCachePayload = {
   projects: ProjectRow[]
 }
 
-const REPORTING_CACHE_KEY = 'contas.reporting.page.v1'
+const REPORTING_CACHE_KEY = 'cloudnine.reporting.page.v1'
 const REPORTING_CACHE_TTL_MS = 3 * 60 * 1000
 
 function readReportingCache(): ReportingCachePayload | null {

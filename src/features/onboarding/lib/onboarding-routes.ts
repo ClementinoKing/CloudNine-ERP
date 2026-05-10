@@ -12,7 +12,7 @@ export function getOnboardingStepFromPathname(pathname: string): OnboardingStep 
 }
 
 function hasOrganization(state: OnboardingState) {
-  return state.organizationName.trim().length >= 2
+  return Boolean(state.organizationId || state.organizationName.trim().length >= 2)
 }
 
 function hasName(state: OnboardingState) {

@@ -26,12 +26,18 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/features/auth/context/auth-context'
 import { useOrganization } from '@/features/organization/context/organization-context'
+import { invokeAdminInvite } from '@/features/organization/lib/invitations'
 import { uploadAvatarToR2 } from '@/lib/r2'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 
 type SettingsTabKey = 'profile' | 'organization' | 'notifications' | 'account' | 'display' | 'apps' | 'admin'
 type InvitationRole = 'owner' | 'admin' | 'member' | 'viewer'
+type AdminInviteResponse = {
+  ok?: boolean
+  status?: 'invited' | 'already_invited' | 'email_taken' | 'error'
+  message?: string
+}
 type WeekdayKey = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday'
 type AvailabilityBlock = { id: string; day: WeekdayKey; startTime: string; endTime: string }
 
@@ -157,10 +163,10 @@ type SettingsInvitesCachePayload = {
   invitations: InvitationItem[]
 }
 
-const SETTINGS_PROFILE_CACHE_PREFIX = 'contas.settings.profile.v1'
-const SETTINGS_STATS_CACHE_PREFIX = 'contas.settings.stats.v1'
-const SETTINGS_PROJECTS_CACHE_KEY = 'contas.settings.projects.v1'
-const SETTINGS_INVITES_CACHE_PREFIX = 'contas.settings.invites.v1'
+const SETTINGS_PROFILE_CACHE_PREFIX = 'cloudnine.settings.profile.v1'
+const SETTINGS_STATS_CACHE_PREFIX = 'cloudnine.settings.stats.v1'
+const SETTINGS_PROJECTS_CACHE_KEY = 'cloudnine.settings.projects.v1'
+const SETTINGS_INVITES_CACHE_PREFIX = 'cloudnine.settings.invites.v1'
 
 const SETTINGS_PROFILE_CACHE_TTL_MS = 10 * 60 * 1000
 const SETTINGS_STATS_CACHE_TTL_MS = 3 * 60 * 1000
@@ -278,27 +284,6 @@ function splitEmails(input: string) {
 
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-}
-
-async function getAdminFunctionHeaders(preferredToken?: string | null) {
-  if (preferredToken) {
-    return { Authorization: `Bearer ${preferredToken}` }
-  }
-
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
-
-  if (session?.access_token) {
-    return { Authorization: `Bearer ${session.access_token}` }
-  }
-
-  const { data: refreshed, error } = await supabase.auth.refreshSession()
-  if (error || !refreshed.session?.access_token) {
-    return null
-  }
-
-  return { Authorization: `Bearer ${refreshed.session.access_token}` }
 }
 
 export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean }) {
@@ -506,33 +491,24 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
   const loadAdminInvitations = async () => {
     if (!isAdmin) return
     if (!currentUser?.id) return
+    if (!currentOrganization.id) return
     setLoadingAdminInvitations(true)
-    const authHeaders = await getAdminFunctionHeaders(session?.token)
-    if (!authHeaders) {
-      setInviteMessage('Your session expired. Sign in again and retry.')
-      setLoadingAdminInvitations(false)
-      return
-    }
-    const { data, error } = await supabase.functions.invoke('admin-invite', {
-      body: { action: 'list' },
-      headers: authHeaders,
-    })
+    const { data, error } = await invokeAdminInvite<{ invitations?: Array<{
+      id: string
+      email: string
+      role: InvitationRole
+      status: 'pending' | 'accepted' | 'revoked' | 'expired'
+      createdAt?: string
+      expiresAt?: string | null
+      created_at?: string
+      expires_at?: string | null
+    }> }>({ action: 'list', organizationId: currentOrganization.id }, session?.token)
     if (error) {
       setInviteMessage(error.message)
       setLoadingAdminInvitations(false)
       return
     }
-    const mappedInvitations = ((data?.invitations as Array<{
-        id: string
-        email: string
-        role: InvitationRole
-        status: 'pending' | 'accepted' | 'revoked' | 'expired'
-        createdAt?: string
-        expiresAt?: string | null
-        created_at?: string
-        expires_at?: string | null
-      }> | undefined) ?? []
-      ).map((item) => ({
+    const mappedInvitations = (data?.invitations ?? []).map((item) => ({
         id: item.id,
         email: item.email,
         role: item.role,
@@ -557,7 +533,7 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
     if (!isAdmin) return
     if (activeTab !== 'admin') return
     void loadAdminInvitations()
-  }, [activeTab, currentUser?.id, isAdmin])
+  }, [activeTab, currentOrganization.id, currentUser?.id, isAdmin])
 
   useEffect(() => {
     if (!isAdmin && activeTab === 'admin') {
@@ -574,6 +550,10 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
   const handleInviteMembers = async () => {
     if (!isAdmin) return
     if (!currentUser?.id) return
+    if (!currentOrganization.id) {
+      setInviteMessage('Select an organization before inviting members.')
+      return
+    }
     const emails = splitEmails(inviteEmailInput)
     if (emails.length === 0) {
       setInviteMessage('Enter at least one email address.')
@@ -582,6 +562,12 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
     const invalidEmails = emails.filter((email) => !isValidEmail(email))
     if (invalidEmails.length > 0) {
       setInviteMessage(`Invalid emails: ${invalidEmails.join(', ')}`)
+      return
+    }
+    const normalizedEmails = emails.map((email) => email.toLowerCase())
+    const duplicateEmail = normalizedEmails.find((email, index) => normalizedEmails.indexOf(email) !== index)
+    if (duplicateEmail) {
+      setInviteMessage(`${duplicateEmail} is entered more than once.`)
       return
     }
     if (!inviteFullName.trim()) {
@@ -597,19 +583,14 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
       return
     }
 
-    const authHeaders = await getAdminFunctionHeaders(session?.token)
-    if (!authHeaders) {
-      setInviteMessage('Your session expired. Sign in again and retry.')
-      return
-    }
-
     setInvitingMembers(true)
     setInviteMessage(null)
     const results = await Promise.all(
       emails.map(async (email) => {
-        const { data, error } = await supabase.functions.invoke('admin-invite', {
-          body: {
+        const { data, error } = await invokeAdminInvite<AdminInviteResponse>(
+          {
             action: 'invite',
+            organizationId: currentOrganization.id,
             email,
             role: inviteRole,
             fullName: inviteFullName.trim(),
@@ -617,14 +598,16 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
             department: inviteDepartment.trim(),
             projectIds: selectedInviteProjectIds,
           },
-          headers: authHeaders,
-        })
+          session?.token,
+        )
         return { data, error }
       }),
     )
     const failures = results.filter((result) => result.error || result.data?.ok === false)
     if (failures.length > 0) {
-      setInviteMessage(`${emails.length - failures.length}/${emails.length} invites sent. Some failed.`)
+      const failedEmail = emails[results.findIndex((result) => result.error || result.data?.ok === false)]
+      const failureMessage = failures[0]?.error?.message ?? failures[0]?.data?.message ?? 'Some failed.'
+      setInviteMessage(`${emails.length - failures.length}/${emails.length} invites sent. ${failedEmail}: ${failureMessage}`)
     } else {
       setInviteMessage(`Invites sent to ${emails.length} teammate(s).`)
       setInviteEmailInput('')
@@ -640,15 +623,14 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
   const handleResendInvite = async (invitationId: string) => {
     if (!isAdmin) return
     if (!currentUser?.id) return
-    const authHeaders = await getAdminFunctionHeaders(session?.token)
-    if (!authHeaders) {
-      setInviteMessage('Your session expired. Sign in again and retry.')
+    if (!currentOrganization.id) {
+      setInviteMessage('Select an organization before resending invites.')
       return
     }
-    const { data, error } = await supabase.functions.invoke('admin-invite', {
-      body: { action: 'resend', invitationId },
-      headers: authHeaders,
-    })
+    const { data, error } = await invokeAdminInvite<AdminInviteResponse>(
+      { action: 'resend', organizationId: currentOrganization.id, invitationId },
+      session?.token,
+    )
     if (error || data?.ok === false) {
       setInviteMessage(error?.message ?? data?.message ?? 'Failed to resend invite.')
       return
@@ -660,15 +642,14 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
   const handleRevokeInvite = async (invitationId: string) => {
     if (!isAdmin) return
     if (!currentUser?.id) return
-    const authHeaders = await getAdminFunctionHeaders(session?.token)
-    if (!authHeaders) {
-      setInviteMessage('Your session expired. Sign in again and retry.')
+    if (!currentOrganization.id) {
+      setInviteMessage('Select an organization before revoking invites.')
       return
     }
-    const { data, error } = await supabase.functions.invoke('admin-invite', {
-      body: { action: 'revoke', invitationId },
-      headers: authHeaders,
-    })
+    const { data, error } = await invokeAdminInvite<AdminInviteResponse>(
+      { action: 'revoke', organizationId: currentOrganization.id, invitationId },
+      session?.token,
+    )
     if (error || data?.ok === false) {
       setInviteMessage(error?.message ?? data?.message ?? 'Failed to revoke invite.')
       return
@@ -1417,7 +1398,7 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
                   </div>
                   <div className='rounded-md border bg-card p-2'>
                     <img
-                      src='https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=https%3A%2F%2Fcontas.app%2Fdownload'
+                      src='https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=https%3A%2F%2Fcloudnine.app%2Fdownload'
                       alt='QR code to download the CloudNine ERP mobile app'
                       width={160}
                       height={160}

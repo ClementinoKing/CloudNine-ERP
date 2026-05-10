@@ -43,3 +43,5 @@ export interface RegisterPayload {
   email: string
   password: string
 }
+
+export type SocialAuthProvider = 'google' | 'apple'

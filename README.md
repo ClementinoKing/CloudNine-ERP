@@ -76,6 +76,38 @@ export default defineConfig([
 ## Frontend deploy
 
 The live frontend is published from the built `dist/` output to the `build` branch through `.github/workflows/frontend-deploy.yml`. That branch is the Hostinger-style static deploy target this repo already matches with `public/.htaccess`.
+
+## Edge Function environment
+
+The invite and notification email functions share the same Resend configuration. Set these secrets for Supabase Edge Functions and any local function runtime you use:
+
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `RESEND_API_KEY`
+- `RESEND_FROM_EMAIL`
+- `APP_BASE_URL`
+- `TASK_REMINDER_DISPATCH_TOKEN`
+- `NOTIFICATION_EMAIL_DISPATCH_TOKEN` (optional; `notify-teammates` falls back to `TASK_REMINDER_DISPATCH_TOKEN`)
+
+`admin-invite`, `notify-teammates`, and `task-reminder-dispatch` all read the shared `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and `APP_BASE_URL` values. `admin-invite` is tenant-scoped and now requires `organizationId` on `invite`, `list`, `resend`, `revoke`, and `check_email` requests. Cron-triggered reminder and recurring-task assignment emails require an internal dispatch token.
+
+To sync function secrets from the repo env file, run:
+
+```bash
+npm run functions:secrets:sync
+```
+
+The deploy helper for `admin-invite` now reads secrets from `./.env` by default and only pushes the supported function keys.
+
+Set the database dispatch settings after choosing a token:
+
+```sql
+alter database postgres set app.settings.task_reminder_dispatch_url = 'https://PROJECT_REF.supabase.co/functions/v1/task-reminder-dispatch';
+alter database postgres set app.settings.notification_email_dispatch_url = 'https://PROJECT_REF.supabase.co/functions/v1/notify-teammates';
+alter database postgres set app.settings.task_reminder_dispatch_token = 'same-long-random-token-as-TASK_REMINDER_DISPATCH_TOKEN';
+alter database postgres set app.settings.notification_email_dispatch_token = 'same-long-random-token-as-NOTIFICATION_EMAIL_DISPATCH_TOKEN';
+```
 # CloudNine-ERP
 # CloudNine-ERP
 # CloudNine-ERP

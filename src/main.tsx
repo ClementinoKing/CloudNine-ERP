@@ -1,13 +1,16 @@
 import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { RouterProvider } from 'react-router-dom'
+import { RotateCw, WifiOff } from 'lucide-react'
 
 import { router } from '@/app/router'
 import { AppProviders } from '@/app/providers'
+import { Button } from '@/components/ui/button'
+import { ErrorSpacePage } from '@/features/errors/components/error-space-page'
 
 import './index.css'
 
-const THEME_STORAGE_KEY = 'contas.ui.theme'
+const THEME_STORAGE_KEY = 'cloudnine.ui.theme'
 const IMAGE_URL_LOG_PREFIX = 'Image URL being set:'
 
 function applyInitialTheme() {
@@ -19,9 +22,9 @@ function applyInitialTheme() {
 }
 
 function suppressNoisyImageLogs() {
-  const consoleWithFlag = console as typeof console & { __contasImageLogFilter?: boolean }
+  const consoleWithFlag = console as typeof console & { __cloudnineImageLogFilter?: boolean }
 
-  if (consoleWithFlag.__contasImageLogFilter) {
+  if (consoleWithFlag.__cloudnineImageLogFilter) {
     return
   }
 
@@ -36,7 +39,7 @@ function suppressNoisyImageLogs() {
     originalLog(...args)
   }
 
-  consoleWithFlag.__contasImageLogFilter = true
+  consoleWithFlag.__cloudnineImageLogFilter = true
 }
 
 applyInitialTheme()
@@ -47,22 +50,23 @@ if (import.meta.env.DEV) {
 
 function OfflineConnectionPage() {
   return (
-    <main className='flex min-h-screen items-center justify-center bg-muted/35 p-6'>
-      <section className='w-full max-w-md rounded-xl border bg-card p-6 text-center shadow-sm'>
-        <p className='text-xs font-semibold uppercase tracking-wide text-muted-foreground'>Connection</p>
-        <h1 className='mt-2 text-2xl font-semibold text-foreground'>No network connection</h1>
-        <p className='mt-2 text-sm text-muted-foreground'>
-          You are offline right now. Reconnect to the internet to continue using CloudNine ERP.
-        </p>
-        <button
-          type='button'
-          onClick={() => window.location.reload()}
-          className='mt-5 inline-flex h-10 items-center justify-center rounded-md border px-4 text-sm font-medium text-foreground transition-colors hover:bg-accent'
-        >
-          Try again
-        </button>
-      </section>
-    </main>
+    <ErrorSpacePage
+      eyebrow='Lost network'
+      title='Offline'
+      description='CloudNine cannot reach the network right now. Reconnect to the internet, then retry the workspace.'
+      icon={WifiOff}
+      actions={
+        <>
+          <Button type='button' size='lg' className='h-12 shadow-[var(--elevation-md)]' onClick={() => window.location.reload()}>
+            <RotateCw className='h-4 w-4' aria-hidden='true' />
+            Try again
+          </Button>
+          <Button type='button' size='lg' variant='outline' className='h-12 bg-card/70' onClick={() => setTimeout(() => window.location.reload(), 150)}>
+            Check connection
+          </Button>
+        </>
+      }
+    />
   )
 }
 

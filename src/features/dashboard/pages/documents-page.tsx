@@ -135,7 +135,7 @@ const DOCUMENT_SORT_OPTIONS: Array<{ value: DocumentSort; label: string; descrip
   { value: 'size-asc', label: 'Size: Smallest to largest', description: 'Show the smallest files first.' },
 ]
 
-const ACTIVE_FOLDER_STORAGE_KEY = 'contas-crm-documents-active-folder'
+const ACTIVE_FOLDER_STORAGE_KEY = 'cloudnine-crm-documents-active-folder'
 
 function readStoredActiveFolderId() {
   if (typeof window === 'undefined') return null

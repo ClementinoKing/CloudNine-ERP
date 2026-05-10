@@ -1,4 +1,10 @@
 import { createClient } from 'npm:@supabase/supabase-js'
+import {
+  reminderSubject,
+  renderReminderEmail,
+  sendResendEmail,
+  type ReminderEmailType,
+} from '../_shared/email.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -6,13 +12,11 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-type ReminderType = 'due_24h' | 'due_1h' | 'overdue'
-
 type ReminderDispatchPayload = {
   notification_id: string
   task_id: string
   recipient_id: string
-  reminder_type: ReminderType
+  reminder_type: ReminderEmailType
   task_title?: string
   due_at?: string
 }
@@ -23,7 +27,6 @@ const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? ''
 const RESEND_FROM_EMAIL = Deno.env.get('RESEND_FROM_EMAIL') ?? ''
 const TASK_REMINDER_DISPATCH_TOKEN = Deno.env.get('TASK_REMINDER_DISPATCH_TOKEN') ?? ''
 const APP_BASE_URL = Deno.env.get('APP_BASE_URL') ?? 'https://cloudninetech.co.za'
-const BRAND_LOGO_URL = 'https://pub-7d1e5686dccc4c4b82b655d5aed298ae.r2.dev/images/Spryar_Tech.png'
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -42,103 +45,13 @@ function normalizeBearerToken(value: string) {
   return match?.[1]?.trim() ?? token
 }
 
-function isReminderType(value: string): value is ReminderType {
+function isReminderType(value: string): value is ReminderEmailType {
   return value === 'due_24h' || value === 'due_1h' || value === 'overdue'
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;')
-}
-
-function getSubject(reminderType: ReminderType) {
-  if (reminderType === 'due_24h') return 'Task due in 24 hours'
-  if (reminderType === 'due_1h') return 'Task due in 1 hour'
-  return 'Task overdue'
-}
-
-function formatDueAtLabel(value?: string) {
-  if (!value) return ''
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) return value
-  return new Intl.DateTimeFormat('en-GB', {
-    day: '2-digit',
-    month: 'long',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: 'UTC',
-    timeZoneName: 'short',
-  }).format(parsed)
-}
-
-function buildMessage(reminderType: ReminderType, taskTitle: string, taskUrl: string, dueAt?: string) {
-  const safeTaskTitle = escapeHtml(taskTitle)
-  const safeTaskUrl = escapeHtml(taskUrl)
-  const safeDueAt = escapeHtml(formatDueAtLabel(dueAt))
-  const isOverdue = reminderType === 'overdue'
-  const hoursLabel = reminderType === 'due_1h' ? '1 hour' : '24 hours'
-  const title = isOverdue ? 'Task overdue' : `Task due in ${hoursLabel}`
-  const intro = isOverdue
-    ? `The task <strong>${safeTaskTitle}</strong> is now overdue.`
-    : `The task <strong>${safeTaskTitle}</strong> is due in <strong>${hoursLabel}</strong>.`
-  const dueCardStyle = isOverdue
-    ? 'margin:0 0 16px 0;padding:12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;font-size:14px;color:#9a3412;'
-    : 'margin:0 0 16px 0;padding:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;font-size:14px;'
-  const dueCard = safeDueAt
-    ? `<div style="${dueCardStyle}"><strong>Due at:</strong> ${safeDueAt}</div>`
-    : ''
-
-  return `
-<!DOCTYPE html>
-<html>
-<body style="margin:0;padding:0;background:#f4f7fb;font-family:Arial,Helvetica,sans-serif;">
-  <table width="100%" style="background:#f4f7fb;padding:24px 12px;">
-    <tr>
-      <td align="center">
-        <table width="100%" style="max-width:600px;background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;">
-          <tr>
-            <td style="padding:28px;border-bottom:1px solid #e2e8f0;text-align:center;">
-              <img src="${BRAND_LOGO_URL}" alt="CloudNine ERP" style="height:42px;">
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:32px 28px;">
-              <h1 style="margin:0 0 14px 0;font-size:24px;">${title}</h1>
-              <p style="margin:0 0 16px 0;font-size:15px;">${intro}</p>
-              ${dueCard}
-              <p style="margin:0;font-size:15px;">Open the task to review the details and stay on schedule.</p>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:8px 28px;">
-              <a href="${safeTaskUrl}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#1a8fe3;color:#ffffff;text-decoration:none;font-weight:700;">
-                Open task
-              </a>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:20px 28px 28px 28px;border-top:1px solid #e2e8f0;">
-              <p style="font-size:12px;color:#94a3b8;margin:0;">This reminder was sent by CloudNine ERP based on the task due date.</p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-  `
 }
 
 async function sendReminderEmail(input: {
   to: string
-  reminderType: ReminderType
+  reminderType: ReminderEmailType
   taskTitle: string
   taskUrl: string
   dueAt?: string
@@ -147,30 +60,15 @@ async function sendReminderEmail(input: {
     return { skipped: true as const, reason: 'Resend is not configured.' }
   }
 
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${RESEND_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: RESEND_FROM_EMAIL,
-      to: [input.to],
-      subject: getSubject(input.reminderType),
-      html: buildMessage(input.reminderType, input.taskTitle, input.taskUrl, input.dueAt),
-    }),
+  const sent = await sendResendEmail({
+    apiKey: RESEND_API_KEY,
+    from: RESEND_FROM_EMAIL,
+    to: input.to,
+    subject: reminderSubject(input.reminderType),
+    html: renderReminderEmail(input),
   })
 
-  const data = await response.json().catch(() => ({}))
-  if (!response.ok) {
-    const message = typeof data?.message === 'string' ? data.message : `Resend failed with status ${response.status}`
-    throw new Error(message)
-  }
-
-  return {
-    skipped: false as const,
-    providerMessageId: typeof data?.id === 'string' ? data.id : null,
-  }
+  return { skipped: false as const, providerMessageId: sent.id }
 }
 
 Deno.serve(async (req) => {

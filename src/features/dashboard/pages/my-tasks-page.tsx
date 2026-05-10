@@ -67,11 +67,11 @@ type ListScopeFilter = 'all' | 'assigned_to_me' | 'due_soon' | 'overdue'
 type ListCompletionFilter = 'all' | 'open' | 'completed'
 type ListStatusFilter = 'all' | TaskRow['status']
 
-const MY_TASKS_ACTIVE_TAB_KEY = 'contas.my-tasks.active-tab'
-const MY_TASKS_SCOPE_KEY = 'contas.my-tasks.scope'
-const MY_TASKS_CACHE_KEY = 'contas.my-tasks.cache.v1'
+const MY_TASKS_ACTIVE_TAB_KEY = 'cloudnine.my-tasks.active-tab'
+const MY_TASKS_SCOPE_KEY = 'cloudnine.my-tasks.scope'
+const MY_TASKS_CACHE_KEY = 'cloudnine.my-tasks.cache.v1'
 const MY_TASKS_CACHE_MAX_AGE_MS = 10 * 60 * 1000
-const COMMENT_PAYLOAD_PREFIX = '__contas_comment_v1__:'
+const COMMENT_PAYLOAD_PREFIX = '__cloudnine_comment_v1__:'
 const COMMENT_EMOJIS = ['😀', '😂', '😍', '👍', '🔥', '🎉', '🙏', '✅']
 const RECORDING_VISUALIZER_BARS = 20
 const PLAYBACK_VISUALIZER_BARS = 22
@@ -1349,9 +1349,9 @@ export function MyTasksPage() {
       }, 180)
     }
 
-    window.addEventListener('contas:realtime-change', onRealtimeChange as EventListener)
+    window.addEventListener('cloudnine:realtime-change', onRealtimeChange as EventListener)
     return () => {
-      window.removeEventListener('contas:realtime-change', onRealtimeChange as EventListener)
+      window.removeEventListener('cloudnine:realtime-change', onRealtimeChange as EventListener)
       if (realtimeReloadDebounceRef.current !== null) {
         window.clearTimeout(realtimeReloadDebounceRef.current)
         realtimeReloadDebounceRef.current = null
@@ -3046,7 +3046,7 @@ export function MyTasksPage() {
     }
     if (currentUser?.id) {
       removeTaskFromMyTasksCache(currentUser.id, taskId)
-      window.dispatchEvent(new CustomEvent('contas:realtime-change', { detail: { table: 'tasks', action: 'DELETE', rowId: taskId } }))
+      window.dispatchEvent(new CustomEvent('cloudnine:realtime-change', { detail: { table: 'tasks', action: 'DELETE', rowId: taskId } }))
     }
     setBackgroundSync('saved')
     return true

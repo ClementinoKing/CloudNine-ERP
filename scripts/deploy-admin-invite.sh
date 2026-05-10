@@ -3,28 +3,37 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_REF_FILE="$ROOT_DIR/supabase/.temp/project-ref"
-SECRETS_ENV_FILE="$ROOT_DIR/supabase/.env.local"
+DEFAULT_ENV_FILE="$ROOT_DIR/.env"
+SECRETS_SCRIPT="$ROOT_DIR/scripts/sync-supabase-function-secrets.sh"
 
 PROJECT_REF="${SUPABASE_PROJECT_REF:-}"
+SECRETS_ENV_FILE="${SUPABASE_SECRETS_ENV_FILE:-$DEFAULT_ENV_FILE}"
 SKIP_SECRETS=0
 
-for arg in "$@"; do
-  case "$arg" in
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --skip-secrets)
       SKIP_SECRETS=1
+      shift
+      ;;
+    --env-file)
+      [[ $# -ge 2 ]] || { echo "Missing value for --env-file" >&2; exit 1; }
+      SECRETS_ENV_FILE="$2"
+      shift 2
       ;;
     --help|-h)
       cat <<'USAGE'
 Usage:
-  ./scripts/deploy-admin-invite.sh [--skip-secrets]
+  ./scripts/deploy-admin-invite.sh [--skip-secrets] [--env-file PATH]
 
 Options:
-  --skip-secrets   Skip syncing secrets from supabase/.env.local
+  --skip-secrets   Skip syncing secrets before deploy
+  --env-file PATH  Source env file for function secrets. Defaults to ./.env
 USAGE
       exit 0
       ;;
     *)
-      echo "Unknown option: $arg" >&2
+      echo "Unknown option: $1" >&2
       exit 1
       ;;
   esac
@@ -47,12 +56,7 @@ fi
 echo "Using Supabase project ref: $PROJECT_REF"
 
 if [[ "$SKIP_SECRETS" -eq 0 ]]; then
-  if [[ -f "$SECRETS_ENV_FILE" ]]; then
-    echo "Syncing function secrets from supabase/.env.local..."
-    supabase secrets set --project-ref "$PROJECT_REF" --env-file "$SECRETS_ENV_FILE"
-  else
-    echo "No supabase/.env.local found, skipping secret sync."
-  fi
+  "$SECRETS_SCRIPT" --project-ref "$PROJECT_REF" --env-file "$SECRETS_ENV_FILE"
 else
   echo "Skipping secret sync (--skip-secrets)."
 fi

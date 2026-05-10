@@ -1,4 +1,11 @@
 import { createClient } from 'npm:@supabase/supabase-js'
+import {
+  notificationSubject,
+  renderNotificationEmail,
+  sendResendEmail as sendBrandedResendEmail,
+  type NotificationContextKind,
+  type NotificationEmailType,
+} from '../_shared/email.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -6,19 +13,17 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-type NotificationEmailType = 'task_assigned' | 'mention'
-
 type NotifyPayload = {
-  type: NotificationEmailType
+  type?: NotificationEmailType
   recipientEmail?: string
   recipientId?: string
   taskId?: string
   taskTitle?: string
   roomId?: string
   roomName?: string
-  actorName: string
+  actorName?: string
   messagePreview?: string
-  contextKind?: 'task' | 'chat'
+  contextKind?: NotificationContextKind
   appUrl?: string
   notificationId: string
 }
@@ -28,8 +33,8 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? D
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? ''
 const RESEND_FROM_EMAIL = Deno.env.get('RESEND_FROM_EMAIL') ?? ''
 const APP_BASE_URL = Deno.env.get('APP_BASE_URL') ?? ''
+const INTERNAL_EMAIL_DISPATCH_TOKEN = Deno.env.get('NOTIFICATION_EMAIL_DISPATCH_TOKEN') ?? Deno.env.get('TASK_REMINDER_DISPATCH_TOKEN') ?? ''
 const FALLBACK_APP_BASE_URL = 'https://cloudninetech.co.za'
-const BRAND_LOGO_URL = 'https://pub-7d1e5686dccc4c4b82b655d5aed298ae.r2.dev/images/Spryar_Tech.png'
 
 function decodeBase64Url(value: string) {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
@@ -59,119 +64,10 @@ function json(body: unknown, status = 200) {
   })
 }
 
-function subjectForType(type: NotificationEmailType, contextKind: 'task' | 'chat', contextName: string) {
-  if (type === 'task_assigned') return 'You were assigned a task'
-  return contextKind === 'chat' ? `You were mentioned in ${contextName}` : 'You were mentioned in a task'
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;')
-}
-
-function bodyForType(
-  type: NotificationEmailType,
-  contextKind: 'task' | 'chat',
-  actorName: string,
-  contextName: string,
-  messagePreview: string | undefined,
-  appUrl: string,
-) {
-  const safeActorName = escapeHtml(actorName)
-  const safeContextName = escapeHtml(contextName)
-  const safeAppUrl = escapeHtml(appUrl)
-  const safeMessagePreview = messagePreview?.trim() ? escapeHtml(messagePreview.trim()) : ''
-  const messageBlock = safeMessagePreview
-    ? `
-          <tr>
-            <td style="padding:0 28px 16px 28px;">
-              <div style="border:1px solid #dbe4f0;border-radius:12px;background:#f8fbff;padding:16px;">
-                <p style="margin:0 0 8px 0;font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#64748b;">Message</p>
-                <p style="margin:0;font-size:14px;line-height:1.7;color:#334155;white-space:pre-wrap;">${safeMessagePreview}</p>
-              </div>
-            </td>
-          </tr>
-        `
-    : ''
-  const heading =
-    type === 'mention' ? (contextKind === 'chat' ? 'You were mentioned in group chat' : 'You were mentioned') : 'You were assigned a task'
-  const intro =
-    type === 'mention'
-      ? contextKind === 'chat'
-        ? `<strong>${safeActorName}</strong> mentioned you in <strong>${safeContextName}</strong>.`
-        : `<strong>${safeActorName}</strong> mentioned you in <strong>${safeContextName}</strong>.`
-      : `<strong>${safeActorName}</strong> assigned you to <strong>${safeContextName}</strong>.`
-  const bodyText =
-    type === 'mention'
-      ? contextKind === 'chat'
-        ? 'Open the dashboard to read the full message and reply in the group chat.'
-        : 'Open the task to view the comment and respond.'
-      : 'Open the task to review the details and begin work.'
-  const footerText =
-    type === 'mention'
-      ? contextKind === 'chat'
-        ? 'This notification was sent by CloudNine ERP because a group chat mention requires your attention.'
-        : 'This notification was sent by CloudNine ERP because a task update requires your attention.'
-      : 'This notification was sent by CloudNine ERP because a new task was assigned to you.'
-
-  return `
-<!DOCTYPE html>
-<html>
-<body style="margin:0;padding:0;background:#f4f7fb;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
-  <table width="100%" style="background:#f4f7fb;padding:24px 12px;">
-    <tr>
-      <td align="center">
-        <table width="100%" style="max-width:600px;background:#ffffff;border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;">
-          <tr>
-            <td style="padding:28px;border-bottom:1px solid #e2e8f0;text-align:center;">
-              <img src="${BRAND_LOGO_URL}" alt="CloudNine ERP" style="height:42px;">
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:32px 28px 16px 28px;">
-              <h1 style="margin:0 0 12px 0;font-size:24px;color:#0f172a;">${heading}</h1>
-              <p style="margin:0 0 16px 0;font-size:15px;line-height:1.7;color:#334155;">${intro}</p>
-              <p style="margin:0;font-size:15px;color:#334155;">${bodyText}</p>
-            </td>
-          </tr>
-          ${messageBlock}
-          <tr>
-            <td style="padding:8px 28px;">
-              <a href="${safeAppUrl}" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#1a8fe3;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;">
-                Open CloudNine ERP
-              </a>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:18px 28px;">
-              <p style="font-size:13px;color:#64748b;margin:0;">Direct link:</p>
-              <p style="font-size:13px;margin:6px 0 0 0;">
-                <a href="${safeAppUrl}" style="color:#b77900;text-decoration:underline;">${safeAppUrl}</a>
-              </p>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:20px 28px 28px 28px;border-top:1px solid #e2e8f0;">
-              <p style="font-size:12px;color:#94a3b8;margin:0;">${footerText}</p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-  `
-}
-
-async function sendResendEmail(input: {
+async function sendNotificationEmail(input: {
   to: string
   type: NotificationEmailType
-  contextKind: 'task' | 'chat'
+  contextKind: NotificationContextKind
   actorName: string
   contextName: string
   messagePreview?: string
@@ -181,29 +77,13 @@ async function sendResendEmail(input: {
     throw new Error('Missing RESEND_API_KEY or RESEND_FROM_EMAIL.')
   }
 
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${RESEND_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      from: RESEND_FROM_EMAIL,
-      to: [input.to],
-      subject: subjectForType(input.type, input.contextKind, input.contextName),
-      html: bodyForType(input.type, input.contextKind, input.actorName, input.contextName, input.messagePreview, input.appUrl),
-    }),
+  return sendBrandedResendEmail({
+    apiKey: RESEND_API_KEY,
+    from: RESEND_FROM_EMAIL,
+    to: input.to,
+    subject: notificationSubject(input),
+    html: renderNotificationEmail(input),
   })
-
-  const data = await response.json().catch(() => ({}))
-  if (!response.ok) {
-    const message = typeof data?.message === 'string' ? data.message : `Resend failed with status ${response.status}`
-    throw new Error(message)
-  }
-
-  return {
-    id: typeof data?.id === 'string' ? data.id : null,
-  }
 }
 
 function resolveBearerToken(req: Request) {
@@ -214,6 +94,17 @@ function resolveBearerToken(req: Request) {
   const bearerMatch = candidate.match(/^Bearer\s+(.+)$/i)
   if (bearerMatch?.[1]) return bearerMatch[1].trim()
   return candidate.trim()
+}
+
+function isNotificationEmailType(value: unknown): value is NotificationEmailType {
+  return value === 'mention' || value === 'task_assigned'
+}
+
+function emailTypeFromMetadata(metadata: Record<string, unknown> | null | undefined): NotificationEmailType | null {
+  const event = metadata?.event
+  if (event === 'task_mentioned') return 'mention'
+  if (event === 'task_assigned') return 'task_assigned'
+  return null
 }
 
 Deno.serve(async (req) => {
@@ -238,29 +129,22 @@ Deno.serve(async (req) => {
     return json({ ok: false, message: 'Invalid JSON payload.' }, 400)
   }
 
-  if (!payload.type || !payload.notificationId || !payload.actorName) {
+  if (!payload.notificationId) {
     return json({ ok: false, message: 'Missing required notification payload fields.' }, 400)
   }
 
-  if (payload.type !== 'mention' && payload.type !== 'task_assigned') {
+  if (payload.type && !isNotificationEmailType(payload.type)) {
     return json({ ok: false, message: 'Unsupported notification email type.' }, 400)
   }
 
-  const contextKind = payload.contextKind ?? 'task'
-  if (contextKind === 'task' && (!payload.taskId || !payload.taskTitle)) {
-    return json({ ok: false, message: 'Missing task notification context.' }, 400)
-  }
-
-  if (contextKind === 'chat' && !payload.roomName) {
-    return json({ ok: false, message: 'Missing chat notification context.' }, 400)
-  }
+  const isInternalDispatch = Boolean(INTERNAL_EMAIL_DISPATCH_TOKEN && accessToken === INTERNAL_EMAIL_DISPATCH_TOKEN)
 
   const requesterId =
     requesterIdFromBearerToken(accessToken) ??
     req.headers.get('x-supabase-auth-user-id') ??
     req.headers.get('x-supabase-auth-user') ??
     null
-  if (!requesterId) {
+  if (!isInternalDispatch && !requesterId) {
     return json({ ok: false, message: 'Unauthorized.' }, 401)
   }
 
@@ -280,12 +164,55 @@ Deno.serve(async (req) => {
     return json({ ok: false, message: 'Notification not found.' }, 404)
   }
 
-  if (notificationRow.actor_id !== requesterId) {
+  if (!isInternalDispatch && notificationRow.actor_id !== requesterId) {
     return json({ ok: false, message: 'Only the actor can trigger this email.' }, 403)
   }
 
+  const notificationMetadata = notificationRow.metadata as Record<string, unknown> | null
+  const emailType = payload.type ?? emailTypeFromMetadata(notificationMetadata)
+  if (!emailType) {
+    return json({ ok: false, message: 'Unable to resolve notification email type.' }, 400)
+  }
+
+  const contextKind: NotificationContextKind = payload.contextKind ?? 'task'
+  let taskTitle = payload.taskTitle
+  let actorName = payload.actorName
+
+  if (contextKind === 'task' && notificationRow.task_id && !taskTitle) {
+    const { data: taskRow, error: taskError } = await serviceClient
+      .from('tasks')
+      .select('title')
+      .eq('id', notificationRow.task_id)
+      .maybeSingle()
+    if (taskError) {
+      return json({ ok: false, message: taskError.message }, 500)
+    }
+    taskTitle = taskRow?.title ?? undefined
+  }
+
+  if (!actorName && notificationRow.actor_id) {
+    const { data: actorProfileRow } = await serviceClient
+      .from('profiles')
+      .select('full_name, email')
+      .eq('id', notificationRow.actor_id)
+      .maybeSingle()
+    actorName = actorProfileRow?.full_name?.trim() || actorProfileRow?.email?.trim() || undefined
+  }
+
+  if (!actorName) {
+    actorName = 'A teammate'
+  }
+
+  if (contextKind === 'task' && (!notificationRow.task_id || !taskTitle)) {
+    return json({ ok: false, message: 'Missing task notification context.' }, 400)
+  }
+
+  if (contextKind === 'chat' && !payload.roomName) {
+    return json({ ok: false, message: 'Missing chat notification context.' }, 400)
+  }
+
   if (contextKind === 'task') {
-    if (notificationRow.task_id !== payload.taskId) {
+    if (payload.taskId && notificationRow.task_id !== payload.taskId) {
       return json({ ok: false, message: 'Task mismatch for this notification.' }, 400)
     }
   } else {
@@ -312,7 +239,7 @@ Deno.serve(async (req) => {
     return json({ ok: false, message: 'Recipient email is missing.' }, 400)
   }
 
-  const idempotencyType = payload.type
+  const idempotencyType = emailType
 
   const { data: existingDelivery } = await serviceClient
     .from('notification_email_deliveries')
@@ -331,15 +258,15 @@ Deno.serve(async (req) => {
     payload.appUrl ??
     (contextKind === 'chat'
       ? `${appBaseUrl}/dashboard/home?openGroupChat=1`
-      : `${appBaseUrl}/dashboard/notifications?openTaskId=${encodeURIComponent(payload.taskId ?? '')}`)
-  const contextName = contextKind === 'chat' ? payload.roomName ?? 'Group Chat' : payload.taskTitle ?? 'a task'
+      : `${appBaseUrl}/dashboard/notifications?openTaskId=${encodeURIComponent(payload.taskId ?? notificationRow.task_id ?? '')}`)
+  const contextName = contextKind === 'chat' ? payload.roomName ?? 'Group Chat' : taskTitle ?? 'a task'
 
   try {
-    const sent = await sendResendEmail({
+    const sent = await sendNotificationEmail({
       to: recipientEmail,
-      type: payload.type,
+      type: emailType,
       contextKind,
-      actorName: payload.actorName,
+      actorName,
       contextName,
       messagePreview: payload.messagePreview,
       appUrl,

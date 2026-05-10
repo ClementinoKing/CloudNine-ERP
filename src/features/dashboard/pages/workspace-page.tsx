@@ -35,9 +35,9 @@ import { supabase } from '@/lib/supabase'
 import { useSearchParams } from 'react-router-dom'
 import { useOrganization } from '@/features/organization/context/organization-context'
 
-const WORKSPACE_MEMBERS_CACHE_KEY = 'contas.workspace.members.v1'
-const WORKSPACE_PRESENCE_CACHE_KEY = 'contas.workspace.presence.v1'
-const WORKSPACE_TIMELINE_CACHE_KEY = 'contas.workspace.timeline.v1'
+const WORKSPACE_MEMBERS_CACHE_KEY = 'cloudnine.workspace.members.v1'
+const WORKSPACE_PRESENCE_CACHE_KEY = 'cloudnine.workspace.presence.v1'
+const WORKSPACE_TIMELINE_CACHE_KEY = 'cloudnine.workspace.timeline.v1'
 const ONLINE_WINDOW_MS = 5 * 60 * 1000
 
 type TeamMember = {
@@ -168,6 +168,7 @@ type WorkspaceSection = {
 
 type WorkspaceSectionGroup = {
   title: string
+  icon: typeof Building2
   items: WorkspaceSection[]
 }
 
@@ -202,12 +203,14 @@ const V1_LIVE_SECTIONS = new Set<WorkspaceSectionKey>([
 const WORKSPACE_SECTION_GROUPS: WorkspaceSectionGroup[] = [
   {
     title: 'Organization',
+    icon: Sparkles,
     items: [
       { key: 'overview', label: 'Overview', description: 'Summary dashboard and quick actions.', icon: Sparkles },
     ],
   },
   {
     title: 'Setup',
+    icon: Building2,
     items: [
       { key: 'organization-settings', label: 'Organization Settings', description: 'Identity and structure settings.', icon: Building2 },
       { key: 'branches', label: 'Branches', description: 'Branch and location setup.', icon: MapPin, comingSoon: true },
@@ -216,6 +219,7 @@ const WORKSPACE_SECTION_GROUPS: WorkspaceSectionGroup[] = [
   },
   {
     title: 'Workforce',
+    icon: Users2,
     items: [
       { key: 'departments', label: 'Departments', description: 'Department structure and occupancy.', icon: Users2 },
       { key: 'jobs', label: 'Jobs', description: 'Roles and job-position mapping.', icon: UserCog },
@@ -225,6 +229,7 @@ const WORKSPACE_SECTION_GROUPS: WorkspaceSectionGroup[] = [
   },
   {
     title: 'Access Control',
+    icon: Shield,
     items: [
       { key: 'roles-permissions', label: 'Roles & Permissions', description: 'Access control matrix.', icon: Shield },
       { key: 'teams', label: 'Teams', description: 'Group-based access control.', icon: Users2, comingSoon: true },
@@ -233,6 +238,7 @@ const WORKSPACE_SECTION_GROUPS: WorkspaceSectionGroup[] = [
   },
   {
     title: 'Work Config',
+    icon: CalendarDays,
     items: [
       { key: 'schedules', label: 'Schedules', description: 'Work schedule and shift templates.', icon: CalendarDays, comingSoon: true },
       { key: 'leave-types', label: 'Leave Types', description: 'Leave and time-off setup.', icon: CalendarDays, comingSoon: true },
@@ -241,6 +247,7 @@ const WORKSPACE_SECTION_GROUPS: WorkspaceSectionGroup[] = [
   },
   {
     title: 'Finance',
+    icon: ReceiptText,
     items: [
       { key: 'invoice-settings', label: 'Invoice Settings', description: 'Invoice numbering and templates.', icon: ReceiptText, comingSoon: true },
       { key: 'tax-settings', label: 'Tax Settings', description: 'Tax policies and defaults.', icon: ReceiptText, comingSoon: true },
@@ -248,6 +255,7 @@ const WORKSPACE_SECTION_GROUPS: WorkspaceSectionGroup[] = [
   },
   {
     title: 'Communication',
+    icon: Mail,
     items: [
       { key: 'notification-settings', label: 'Notifications', description: 'Organization notification defaults.', icon: Bell },
       { key: 'email-templates', label: 'Email Templates', description: 'Template branding and copy.', icon: Mail, comingSoon: true },
@@ -255,6 +263,7 @@ const WORKSPACE_SECTION_GROUPS: WorkspaceSectionGroup[] = [
   },
   {
     title: 'Documents',
+    icon: FileText,
     items: [
       { key: 'templates', label: 'Templates', description: 'Document template standards.', icon: FileText, comingSoon: true },
       { key: 'branding', label: 'Branding', description: 'Branding across PDF and email assets.', icon: Building2, comingSoon: true },
@@ -262,6 +271,7 @@ const WORKSPACE_SECTION_GROUPS: WorkspaceSectionGroup[] = [
   },
   {
     title: 'Integrations',
+    icon: Workflow,
     items: [
       { key: 'api-keys', label: 'API Keys', description: 'External API key management.', icon: KeyRound, comingSoon: true },
       { key: 'webhooks', label: 'Webhooks', description: 'Outbound event subscriptions.', icon: Workflow, comingSoon: true },
@@ -269,6 +279,7 @@ const WORKSPACE_SECTION_GROUPS: WorkspaceSectionGroup[] = [
   },
   {
     title: 'Security',
+    icon: Shield,
     items: [
       { key: 'two-factor', label: '2FA', description: 'Multi-factor authentication policy.', icon: Shield, comingSoon: true },
       { key: 'audit-logs', label: 'Audit Logs', description: 'Organization access and action traces.', icon: FileText },
@@ -276,6 +287,7 @@ const WORKSPACE_SECTION_GROUPS: WorkspaceSectionGroup[] = [
   },
   {
     title: 'Billing',
+    icon: ReceiptText,
     items: [
       { key: 'subscription', label: 'Subscription', description: 'Plan status and subscription details.', icon: ReceiptText, comingSoon: true },
       { key: 'usage', label: 'Usage', description: 'Current usage and threshold visibility.', icon: Users2, comingSoon: true },
@@ -283,6 +295,7 @@ const WORKSPACE_SECTION_GROUPS: WorkspaceSectionGroup[] = [
   },
   {
     title: 'Data',
+    icon: FileText,
     items: [
       { key: 'import-export', label: 'Import / Export', description: 'Data import and export operations.', icon: FileText, comingSoon: true },
       { key: 'backups', label: 'Backups', description: 'Backup and restore controls.', icon: FileText, comingSoon: true },
@@ -372,7 +385,7 @@ function invitationStatusClass(status: string) {
 }
 
 function openInvitePeopleDialog() {
-  window.dispatchEvent(new CustomEvent('contas:open-invite-people'))
+  window.dispatchEvent(new CustomEvent('cloudnine:open-invite-people'))
 }
 
 function DepartmentSelectPopover({
@@ -420,7 +433,11 @@ function DepartmentSelectPopover({
             placeholder='Search departments'
             className='h-9'
           />
-          <div className='max-h-44 overflow-y-auto rounded-md border'>
+          <div
+            className='max-h-44 overscroll-contain overflow-y-auto rounded-md border'
+            onWheel={(event) => event.stopPropagation()}
+            onTouchMove={(event) => event.stopPropagation()}
+          >
             {filteredDepartments.length === 0 ? (
               <p className='px-3 py-2 text-xs text-muted-foreground'>No departments found.</p>
             ) : (
@@ -816,7 +833,11 @@ function MemberDetailsDialog({
                             placeholder='Search departments'
                             className='h-9'
                           />
-                          <div className='max-h-44 overflow-y-auto rounded-md border'>
+                          <div
+                            className='max-h-44 overscroll-contain overflow-y-auto rounded-md border'
+                            onWheel={(event) => event.stopPropagation()}
+                            onTouchMove={(event) => event.stopPropagation()}
+                          >
                             {filteredDepartmentOptions.length === 0 ? (
                               <p className='px-3 py-2 text-xs text-muted-foreground'>No departments found.</p>
                             ) : (
@@ -873,7 +894,11 @@ function MemberDetailsDialog({
                       <PopoverContent className='w-[var(--radix-popover-trigger-width)] p-2' align='start'>
                         <div className='space-y-2'>
                           <Input value={jobQuery} onChange={(event) => setJobQuery(event.target.value)} placeholder='Search jobs' className='h-9' />
-                          <div className='max-h-44 overflow-y-auto rounded-md border'>
+                          <div
+                            className='max-h-44 overscroll-contain overflow-y-auto rounded-md border'
+                            onWheel={(event) => event.stopPropagation()}
+                            onTouchMove={(event) => event.stopPropagation()}
+                          >
                             {filteredJobOptionsByQuery.length === 0 ? (
                               <p className='px-3 py-2 text-xs text-muted-foreground'>No jobs found for this department.</p>
                             ) : (
@@ -1145,77 +1170,95 @@ export function WorkspacePage() {
     let cancelled = false
     let refreshTimer: number | null = null
     let pollTimer: number | null = null
+    let loadErrorNotified = false
 
     const loadMembersAndPresence = async () => {
-      const membersResult = await supabase
-        .from('profiles')
-        .select('id, full_name, email, avatar_url, job_title, department, role_label, account_status, deactivated_at, deleted_at, availability_schedule')
-        .order('full_name', { ascending: true })
-      if (!cancelled && !membersResult.error && membersResult.data) {
-        setMembers(membersResult.data as TeamMember[])
-        writeCachedArray(WORKSPACE_MEMBERS_CACHE_KEY, membersResult.data as TeamMember[])
-      }
+      try {
+        const membersResult = await supabase
+          .from('profiles')
+          .select('id, full_name, email, avatar_url, job_title, department, role_label, account_status, deactivated_at, deleted_at, availability_schedule')
+          .order('full_name', { ascending: true })
+        if (!cancelled && !membersResult.error && membersResult.data) {
+          setMembers(membersResult.data as TeamMember[])
+          writeCachedArray(WORKSPACE_MEMBERS_CACHE_KEY, membersResult.data as TeamMember[])
+        }
 
-      const sinceIso = new Date(Date.now() - 6 * 60 * 1000).toISOString()
-      const presenceResult = await supabase
-        .from('user_presence_sessions')
-        .select('user_id, is_online, last_seen_at')
-        .eq('is_online', true)
-        .gte('last_seen_at', sinceIso)
+        const sinceIso = new Date(Date.now() - 6 * 60 * 1000).toISOString()
+        const presenceResult = await supabase
+          .from('user_presence_sessions')
+          .select('user_id, is_online, last_seen_at')
+          .eq('is_online', true)
+          .gte('last_seen_at', sinceIso)
 
-      if (!cancelled && !presenceResult.error && presenceResult.data) {
-        setPresenceSessions(presenceResult.data as PresenceSession[])
-        writeCachedArray(WORKSPACE_PRESENCE_CACHE_KEY, presenceResult.data as PresenceSession[])
-      }
+        if (!cancelled && !presenceResult.error && presenceResult.data) {
+          setPresenceSessions(presenceResult.data as PresenceSession[])
+          writeCachedArray(WORKSPACE_PRESENCE_CACHE_KEY, presenceResult.data as PresenceSession[])
+        }
 
-      const timelineResult = await supabase
-        .from('organization_timeline_events')
-        .select('id, title, event_type, starts_at')
-        .gte('starts_at', new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString())
-        .order('starts_at', { ascending: true })
-        .limit(10)
+        const timelineResult = await supabase
+          .from('organization_timeline_events')
+          .select('id, title, event_type, starts_at')
+          .gte('starts_at', new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString())
+          .order('starts_at', { ascending: true })
+          .limit(10)
 
-      if (!cancelled && !timelineResult.error && timelineResult.data) {
-        setTimelineEvents(timelineResult.data as OrganizationTimelineEvent[])
-        writeCachedArray(WORKSPACE_TIMELINE_CACHE_KEY, timelineResult.data as OrganizationTimelineEvent[])
-      }
+        if (!cancelled && !timelineResult.error && timelineResult.data) {
+          setTimelineEvents(timelineResult.data as OrganizationTimelineEvent[])
+          writeCachedArray(WORKSPACE_TIMELINE_CACHE_KEY, timelineResult.data as OrganizationTimelineEvent[])
+        }
 
-      const invitationsResult = await supabase
-        .from('organization_invitations')
-        .select('id, email, role, status, created_at, expires_at')
-        .order('created_at', { ascending: false })
-        .limit(25)
+        const invitationsResult = await supabase
+          .from('organization_invitations')
+          .select('id, email, role, status, created_at, expires_at')
+          .order('created_at', { ascending: false })
+          .limit(25)
 
-      if (!cancelled && !invitationsResult.error && invitationsResult.data) {
-        setInvitations(invitationsResult.data as WorkspaceInvitation[])
-      }
+        if (!cancelled && !invitationsResult.error && invitationsResult.data) {
+          setInvitations(invitationsResult.data as WorkspaceInvitation[])
+        }
 
-      const departmentsResult = await supabase
-        .from('departments')
-        .select('id, organization_id, name, description, is_active, created_by, created_at, updated_at, archived_at')
-        .eq('organization_id', currentOrganization.id)
-        .order('name', { ascending: true })
+        const departmentsResult = await supabase
+          .from('departments')
+          .select('id, organization_id, name, description, is_active, created_by, created_at, updated_at, archived_at')
+          .eq('organization_id', currentOrganization.id)
+          .order('name', { ascending: true })
 
-      if (!cancelled && !departmentsResult.error && departmentsResult.data) {
-        setDepartments(departmentsResult.data as DepartmentRow[])
-      }
+        if (!cancelled && !departmentsResult.error && departmentsResult.data) {
+          setDepartments(departmentsResult.data as DepartmentRow[])
+        }
 
-      const jobsResult = await supabase
-        .from('jobs')
-        .select('id, organization_id, department_id, name, description, is_active, created_by, created_at, updated_at, archived_at')
-        .eq('organization_id', currentOrganization.id)
-        .order('name', { ascending: true })
+        const jobsResult = await supabase
+          .from('jobs')
+          .select('id, organization_id, department_id, name, description, is_active, created_by, created_at, updated_at, archived_at')
+          .eq('organization_id', currentOrganization.id)
+          .order('name', { ascending: true })
 
-      if (!cancelled && !jobsResult.error && jobsResult.data) {
-        setJobs(jobsResult.data as JobRow[])
-      }
+        if (!cancelled && !jobsResult.error && jobsResult.data) {
+          setJobs(jobsResult.data as JobRow[])
+        }
 
-      if (!cancelled) {
+        if (!cancelled) {
+          setLoadingWorkspace(false)
+        }
+      } catch (error) {
+        if (cancelled) return
+
         setLoadingWorkspace(false)
+        console.error('Workspace data refresh failed', error)
+
+        if (!loadErrorNotified) {
+          loadErrorNotified = true
+          const message = error instanceof Error ? error.message : 'Unable to load workspace data.'
+          notify.error('Workspace data refresh failed', { description: message })
+        }
       }
     }
 
-    void loadMembersAndPresence()
+    const refreshWorkspaceData = () => {
+      void loadMembersAndPresence()
+    }
+
+    refreshWorkspaceData()
 
     const channel = supabase
       .channel('workspace-profiles-presence')
@@ -1224,7 +1267,7 @@ export function WorkspacePage() {
           window.clearTimeout(refreshTimer)
         }
         refreshTimer = window.setTimeout(() => {
-          void loadMembersAndPresence()
+          refreshWorkspaceData()
           refreshTimer = null
         }, 200)
       })
@@ -1233,7 +1276,7 @@ export function WorkspacePage() {
           window.clearTimeout(refreshTimer)
         }
         refreshTimer = window.setTimeout(() => {
-          void loadMembersAndPresence()
+          refreshWorkspaceData()
           refreshTimer = null
         }, 200)
       })
@@ -1242,7 +1285,7 @@ export function WorkspacePage() {
           window.clearTimeout(refreshTimer)
         }
         refreshTimer = window.setTimeout(() => {
-          void loadMembersAndPresence()
+          refreshWorkspaceData()
           refreshTimer = null
         }, 200)
       })
@@ -1251,7 +1294,7 @@ export function WorkspacePage() {
           window.clearTimeout(refreshTimer)
         }
         refreshTimer = window.setTimeout(() => {
-          void loadMembersAndPresence()
+          refreshWorkspaceData()
           refreshTimer = null
         }, 200)
       })
@@ -1260,7 +1303,7 @@ export function WorkspacePage() {
           window.clearTimeout(refreshTimer)
         }
         refreshTimer = window.setTimeout(() => {
-          void loadMembersAndPresence()
+          refreshWorkspaceData()
           refreshTimer = null
         }, 200)
       })
@@ -1269,7 +1312,7 @@ export function WorkspacePage() {
           window.clearTimeout(refreshTimer)
         }
         refreshTimer = window.setTimeout(() => {
-          void loadMembersAndPresence()
+          refreshWorkspaceData()
           refreshTimer = null
         }, 200)
       })
@@ -1277,13 +1320,13 @@ export function WorkspacePage() {
 
     const handleRealtimeChange = (event: Event) => {
       const detail = (event as CustomEvent<{ table?: string }>).detail
-      if (!detail?.table || !['profiles', 'organization_invitations'].includes(detail.table)) return
-      void loadMembersAndPresence()
+      if (!detail?.table || !['profiles', 'organization_invitations', 'departments', 'jobs'].includes(detail.table)) return
+      refreshWorkspaceData()
     }
-    window.addEventListener('contas:realtime-change', handleRealtimeChange as EventListener)
+    window.addEventListener('cloudnine:realtime-change', handleRealtimeChange as EventListener)
 
     pollTimer = window.setInterval(() => {
-      void loadMembersAndPresence()
+      refreshWorkspaceData()
     }, 45000)
 
     return () => {
@@ -1294,7 +1337,7 @@ export function WorkspacePage() {
       if (pollTimer !== null) {
         window.clearInterval(pollTimer)
       }
-      window.removeEventListener('contas:realtime-change', handleRealtimeChange as EventListener)
+      window.removeEventListener('cloudnine:realtime-change', handleRealtimeChange as EventListener)
       void supabase.removeChannel(channel)
     }
   }, [currentOrganization.id])
@@ -1664,18 +1707,27 @@ export function WorkspacePage() {
     WORKSPACE_SECTION_GROUPS[0].items[0]
 
   return (
-    <div className='grid min-h-[calc(100vh-8rem)] gap-4 lg:grid-cols-[280px_minmax(0,1fr)]'>
+    <div className='grid min-h-[calc(100vh-8rem)] gap-4 lg:grid-cols-[252px_minmax(0,1fr)]'>
       <aside className='h-full w-full lg:sticky lg:top-4 lg:self-start'>
-        <Card className='h-full w-full lg:h-[calc(100vh-8rem)]'>
-          <CardHeader className='px-6 pb-3 pt-6'>
-            <CardTitle className='text-xs uppercase tracking-[0.18em] text-muted-foreground'>Sections</CardTitle>
-          </CardHeader>
-          <CardContent className='h-[calc(100%-4.5rem)] space-y-3 overflow-y-auto px-5 pb-6'>
+        <div className='flex h-full w-full flex-col overflow-hidden rounded-xl border border-border/80 bg-card text-card-foreground shadow-sm lg:h-[calc(100vh-8rem)]'>
+          <div className='border-b border-border/70 px-3 py-3'>
+            <div className='flex items-center gap-2 rounded-lg px-2 py-1.5'>
+              <span className='flex h-8 w-8 shrink-0 items-center justify-center rounded-md border bg-muted/30'>
+                <Building2 className='h-4 w-4 text-muted-foreground' />
+              </span>
+              <div className='min-w-0'>
+                <p className='truncate text-sm font-semibold text-foreground'>{currentOrganization.name}</p>
+                <p className='truncate text-xs text-muted-foreground'>Organization settings</p>
+              </div>
+            </div>
+          </div>
+          <div className='min-h-0 flex-1 space-y-2 overflow-y-auto px-2 py-3'>
             {WORKSPACE_SECTION_GROUPS.map((group) => {
               const hasActive = group.items.some((item) => item.key === activeSection)
               const isExpanded = groupExpansionOverrides[group.title] ?? (hasActive || group.title === 'Organization')
+              const GroupIcon = group.icon
               return (
-                <div key={group.title} className='overflow-hidden rounded-2xl border border-border/80 bg-muted/5'>
+                <div key={group.title} className='space-y-1'>
                   <button
                     type='button'
                     onClick={() =>
@@ -1684,15 +1736,20 @@ export function WorkspacePage() {
                         [group.title]: !isExpanded,
                       }))
                     }
-                    className='flex w-full items-center justify-between px-5 py-4 text-left'
+                    className={`flex h-8 w-full items-center justify-between rounded-md px-2 text-left transition-colors ${
+                      hasActive ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                    }`}
                   >
-                    <span className={`text-xs font-semibold uppercase tracking-[0.14em] ${hasActive ? 'text-foreground' : 'text-muted-foreground'}`}>
-                      {group.title}
+                    <span className='flex min-w-0 items-center gap-2'>
+                      <GroupIcon className={`h-3.5 w-3.5 shrink-0 ${hasActive ? 'text-primary' : 'text-muted-foreground'}`} />
+                      <span className={`truncate text-[11px] font-semibold uppercase tracking-[0.14em] ${hasActive ? 'text-primary' : 'text-muted-foreground'}`}>
+                        {group.title}
+                      </span>
                     </span>
-                    <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                    <ChevronDown className={`h-3.5 w-3.5 transition-transform ${hasActive ? 'text-primary' : 'text-muted-foreground'} ${isExpanded ? 'rotate-180' : ''}`} />
                   </button>
                   {isExpanded ? (
-                    <div className='space-y-2 border-t border-border/70 px-3 pb-3 pt-3'>
+                    <div className='ml-4 space-y-1 border-l border-border/60 pl-2'>
                       {group.items.map((item) => {
                         const Icon = item.icon
                         const isActive = activeSection === item.key
@@ -1702,18 +1759,18 @@ export function WorkspacePage() {
                             key={item.key}
                             type='button'
                             onClick={() => setSection(item.key)}
-                            className={`flex w-full items-center justify-between rounded-xl px-3.5 py-3 text-left transition-colors ${
+                            className={`group/menu flex h-9 w-full items-center justify-between rounded-md px-2.5 text-left text-sm transition-colors ${
                               isActive
-                                ? 'bg-primary/10 text-foreground'
-                                : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                                ? 'bg-primary/10 text-primary shadow-[inset_3px_0_0_hsl(var(--primary))]'
+                                : 'text-muted-foreground hover:bg-muted/45 hover:text-foreground'
                             }`}
                           >
-                            <span className='flex min-w-0 items-center gap-2'>
-                              <Icon className='h-4 w-4 shrink-0' />
+                            <span className='flex min-w-0 items-center gap-2.5'>
+                              <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-primary' : 'text-muted-foreground group-hover/menu:text-foreground'}`} />
                               <span className='truncate text-sm'>{item.label}</span>
                             </span>
                             {isComingSoon ? (
-                              <Badge variant='outline' className='text-[10px] uppercase tracking-wide text-muted-foreground'>
+                              <Badge variant='outline' className='h-5 rounded-md px-1.5 text-[9px] uppercase tracking-wide text-muted-foreground'>
                                 Soon
                               </Badge>
                             ) : null}
@@ -1725,8 +1782,8 @@ export function WorkspacePage() {
                 </div>
               )
             })}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </aside>
 
       <div className='space-y-4'>
@@ -1759,54 +1816,6 @@ export function WorkspacePage() {
               <Card><CardContent className='p-4'><p className='text-xs text-muted-foreground'>Active Modules</p><p className='text-2xl font-semibold'>8</p></CardContent></Card>
               <Card><CardContent className='p-4'><p className='text-xs text-muted-foreground'>Online Now</p><p className='text-2xl font-semibold'>{onlineCollaborators}</p></CardContent></Card>
             </section>
-            <Card>
-              <CardHeader className='pb-3'>
-                <div className='flex flex-wrap items-center justify-between gap-3'>
-                  <div>
-                    <CardTitle>Invitations</CardTitle>
-                    <p className='mt-1 text-xs text-muted-foreground'>Pending and recent organization invite activity.</p>
-                  </div>
-                  <Button size='sm' className='gap-1.5' onClick={openInvitePeopleDialog} disabled={!canInviteUsers}>
-                    <UserPlus className='h-4 w-4' />
-                    Invite user
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {invitations.length === 0 ? (
-                  <p className='rounded-md border bg-muted/10 px-3 py-4 text-sm text-muted-foreground'>No invitations yet.</p>
-                ) : (
-                  <div className='overflow-x-auto rounded-md border'>
-                    <table className='w-full min-w-[680px] text-sm'>
-                      <thead className='bg-muted/30 text-left text-xs uppercase tracking-wide text-muted-foreground'>
-                        <tr>
-                          <th className='px-3 py-2'>Email</th>
-                          <th className='px-3 py-2'>Role</th>
-                          <th className='px-3 py-2'>Status</th>
-                          <th className='px-3 py-2'>Sent</th>
-                          <th className='px-3 py-2'>Expires</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {invitations.slice(0, 6).map((invite) => (
-                          <tr key={invite.id} className='border-t border-border/70'>
-                            <td className='px-3 py-2.5 font-medium text-foreground'>{invite.email}</td>
-                            <td className='px-3 py-2.5 capitalize text-muted-foreground'>{invite.role}</td>
-                            <td className='px-3 py-2.5'>
-                              <Badge variant='outline' className={invitationStatusClass(invite.status)}>
-                                {invite.status}
-                              </Badge>
-                            </td>
-                            <td className='px-3 py-2.5 text-muted-foreground'>{formatInvitationDate(invite.created_at)}</td>
-                            <td className='px-3 py-2.5 text-muted-foreground'>{formatInvitationDate(invite.expires_at)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
             <section className='grid gap-4 xl:grid-cols-[1.35fr_1fr]'>
               <Card>
                 <CardHeader className='pb-3'><CardTitle>Team Members</CardTitle></CardHeader>

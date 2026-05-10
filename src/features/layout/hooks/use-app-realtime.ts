@@ -26,7 +26,7 @@ type RealtimePayload = {
 
 export function useAppRealtime() {
   useEffect(() => {
-    const channel = supabase.channel('contas-app-realtime')
+    const channel = supabase.channel('cloudnine-app-realtime')
 
     for (const table of REALTIME_TABLES) {
       channel.on(
@@ -34,7 +34,7 @@ export function useAppRealtime() {
         { event: '*', schema: 'public', table },
         (payload) => {
           window.dispatchEvent(
-            new CustomEvent<RealtimePayload>('contas:realtime-change', {
+            new CustomEvent<RealtimePayload>('cloudnine:realtime-change', {
               detail: { table, eventType: payload.eventType },
             }),
           )

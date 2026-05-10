@@ -1,6 +1,6 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 
-import { AuthRedirectRoute, ProtectedRoute } from './route-guards'
+import { AuthRedirectRoute, ProtectedRoute, RootRoute } from './route-guards'
 import { DashboardHomePage } from '@/features/dashboard/pages/dashboard-home-page'
 import { MyTasksPage } from '@/features/dashboard/pages/my-tasks-page'
 import { NotificationsPage } from '@/features/dashboard/pages/notifications-page'
@@ -14,35 +14,26 @@ import { ToolsPage } from '@/features/dashboard/pages/tools-page'
 import { LoginPage } from '@/features/auth/pages/login-page'
 import { RegisterPage } from '@/features/auth/pages/register-page'
 import { ResetPasswordPage } from '@/features/auth/pages/reset-password-page'
+import { ForgotPasswordPage } from '@/features/auth/pages/forgot-password-page'
 import { AppShellLayout } from '@/features/layout/components/app-shell-layout'
 import { SettingsPage } from '@/features/settings/pages/settings-page'
 import { OnboardingNamePage } from '@/features/onboarding/pages/onboarding-name-page'
 import { OnboardingOrganizationPage } from '@/features/onboarding/pages/onboarding-organization-page'
 import { OnboardingWorkPage } from '@/features/onboarding/pages/onboarding-work-page'
 import { OnboardingToolsPage } from '@/features/onboarding/pages/onboarding-tools-page'
+import { NotFoundPage } from '@/features/errors/pages/not-found-page'
 
-const LAST_DASHBOARD_PATH_KEY = 'contas.last-dashboard-path'
+const LAST_DASHBOARD_PATH_KEY = 'cloudnine.last-dashboard-path'
 
 function getLastDashboardPath() {
   const savedPath = sessionStorage.getItem(LAST_DASHBOARD_PATH_KEY)
   return savedPath && savedPath.startsWith('/dashboard/') ? savedPath : '/dashboard/home'
 }
 
-function NotFoundPage() {
-  return (
-    <main className='flex min-h-screen items-center justify-center p-6'>
-      <div className='space-y-2 text-center'>
-        <p className='text-sm font-semibold uppercase tracking-wide text-muted-foreground'>404</p>
-        <h1 className='text-2xl font-semibold'>Page not found</h1>
-      </div>
-    </main>
-  )
-}
-
 export const router = createBrowserRouter([
   {
     path: '/',
-    element: <Navigate to={getLastDashboardPath()} replace />,
+    element: <RootRoute />,
   },
   {
     element: <AuthRedirectRoute />,
@@ -50,6 +41,10 @@ export const router = createBrowserRouter([
       { path: '/login', element: <LoginPage /> },
       { path: '/register', element: <RegisterPage /> },
     ],
+  },
+  {
+    path: '/forgot-password',
+    element: <ForgotPasswordPage />,
   },
   {
     element: <ProtectedRoute />,

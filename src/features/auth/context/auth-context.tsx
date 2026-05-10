@@ -1,9 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react'
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js'
 
-import { STORAGE_KEYS } from '@/lib/storage'
+import { APP_STORAGE_PREFIX, LEGACY_STORAGE_PREFIX, STORAGE_KEYS } from '@/lib/storage'
 import { supabase } from '@/lib/supabase'
-import type { AccountStatus, AuthSession, LoginPayload, OnboardingState, RegisterPayload, User } from '@/types/auth'
+import type { AccountStatus, AuthSession, LoginPayload, OnboardingState, RegisterPayload, SocialAuthProvider, User } from '@/types/auth'
 
 type AuthState = {
   session: AuthSession | null
@@ -27,6 +27,8 @@ export interface AuthContextValue {
   profileLoading: boolean
   login: (payload: LoginPayload) => Promise<void>
   register: (payload: RegisterPayload) => Promise<void>
+  signInWithSocialProvider: (provider: SocialAuthProvider) => Promise<void>
+  sendPasswordResetEmail: (email: string) => Promise<void>
   updateCurrentUser: (updates: Partial<User>) => void
   updateOnboarding: (updates: Partial<OnboardingState>) => void
   completeOnboarding: (updates?: Partial<OnboardingState>) => Promise<void>
@@ -52,6 +54,8 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 
 type ProfileSnapshot = {
   id?: string
+  organization_id: string | null
+  active_organization_id: string | null
   full_name: string | null
   email: string | null
   avatar_url: string | null
@@ -62,14 +66,27 @@ type ProfileSnapshot = {
   deactivated_at: string | null
   deleted_at: string | null
   must_reset_password: boolean | null
+  onboarding_completed: boolean | null
+  onboarding_step: OnboardingState['currentStep'] | null
+  onboarding_role: string | null
+  onboarding_work_function: string | null
+  onboarding_use_case: string | null
+  onboarding_tools: string[] | null
+  organization_name?: string | null
+  organization_industry?: string | null
 }
 
 type CachedProfileSnapshot = ProfileSnapshot & {
   id: string
 }
 
+type ProfileTenantSnapshot = {
+  organization_id: string | null
+  active_organization_id: string | null
+}
+
 function normalizeOnboardingStep(step?: string | null): OnboardingState['currentStep'] {
-  if (step === 'work' || step === 'tools') return step
+  if (step === 'organization' || step === 'work' || step === 'tools') return step
   return 'name'
 }
 
@@ -123,6 +140,22 @@ function createInitialOnboarding({
   }
 }
 
+function createOnboardingFromProfile(profile: Partial<ProfileSnapshot>, fallbackFullName = ''): OnboardingState {
+  const completed = Boolean(profile.onboarding_completed)
+  return {
+    completed,
+    currentStep: completed ? 'tools' : normalizeOnboardingStep(profile.onboarding_step),
+    fullName: profile.full_name ?? fallbackFullName,
+    organizationId: profile.active_organization_id ?? profile.organization_id ?? '',
+    organizationName: profile.organization_name ?? '',
+    organizationIndustry: profile.organization_industry ?? '',
+    role: profile.onboarding_role ?? '',
+    workFunction: profile.onboarding_work_function ?? '',
+    useCase: profile.onboarding_use_case ?? '',
+    tools: profile.onboarding_tools ?? [],
+  }
+}
+
 function readCachedProfile(userId: string): CachedProfileSnapshot | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.profileCache)
@@ -150,14 +183,22 @@ function clearAccessNotice() {
   sessionStorage.removeItem(STORAGE_KEYS.accessNotice)
 }
 
+function markPasswordRecoveryActive() {
+  sessionStorage.setItem(STORAGE_KEYS.passwordRecoveryActive, 'true')
+}
+
+function clearPasswordRecoveryActive() {
+  sessionStorage.removeItem(STORAGE_KEYS.passwordRecoveryActive)
+}
+
 function purgeCachedClientDataOnLogout() {
-  const preservedKeys = new Set<string>(['contas.ui.theme', STORAGE_KEYS.sidebarCollapsed])
+  const preservedKeys = new Set<string>([`${APP_STORAGE_PREFIX}.ui.theme`, STORAGE_KEYS.sidebarCollapsed])
 
   const localKeys = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)).filter(
     (key): key is string => Boolean(key),
   )
   for (const key of localKeys) {
-    if (!key.startsWith('contas.')) continue
+    if (!key.startsWith(`${APP_STORAGE_PREFIX}.`) && !key.startsWith(`${LEGACY_STORAGE_PREFIX}.`)) continue
     if (preservedKeys.has(key)) continue
     localStorage.removeItem(key)
   }
@@ -166,7 +207,7 @@ function purgeCachedClientDataOnLogout() {
     (key): key is string => Boolean(key),
   )
   for (const key of sessionKeys) {
-    if (!key.startsWith('contas.')) continue
+    if (!key.startsWith(`${APP_STORAGE_PREFIX}.`) && !key.startsWith(`${LEGACY_STORAGE_PREFIX}.`)) continue
     sessionStorage.removeItem(key)
   }
 }
@@ -174,6 +215,8 @@ function purgeCachedClientDataOnLogout() {
 function cacheProfileFromUser(user: User) {
   writeCachedProfile({
     id: user.id,
+    organization_id: user.onboarding?.organizationId ?? null,
+    active_organization_id: user.onboarding?.organizationId ?? null,
     full_name: user.name,
     email: user.email,
     avatar_url: user.avatarUrl ?? user.avatarPath ?? null,
@@ -184,6 +227,14 @@ function cacheProfileFromUser(user: User) {
     deactivated_at: null,
     deleted_at: null,
     must_reset_password: user.mustResetPassword ?? false,
+    onboarding_completed: user.onboarding?.completed ?? false,
+    onboarding_step: user.onboarding?.currentStep ?? 'organization',
+    onboarding_role: user.onboarding?.role ?? null,
+    onboarding_work_function: user.onboarding?.workFunction ?? null,
+    onboarding_use_case: user.onboarding?.useCase ?? null,
+    onboarding_tools: user.onboarding?.tools ?? [],
+    organization_name: user.onboarding?.organizationName ?? null,
+    organization_industry: user.onboarding?.organizationIndustry ?? null,
   })
 }
 
@@ -195,11 +246,25 @@ function getAccessDeniedMessage(status: AccountStatus) {
   return 'Your account has been deactivated. Contact your administrator.'
 }
 
+function getAppOrigin() {
+  return window.location.origin
+}
+
+function getPasswordResetRedirectUrl() {
+  return `${getAppOrigin()}/reset-password`
+}
+
+function getOAuthRedirectUrl() {
+  return `${getAppOrigin()}/dashboard/home`
+}
+
 function extractStoredSupabaseSession() {
   try {
     const raw =
       localStorage.getItem(STORAGE_KEYS.supabaseAuthToken) ??
-      localStorage.getItem(STORAGE_KEYS.supabaseAuthTokenLegacy)
+      localStorage.getItem(STORAGE_KEYS.supabaseAuthTokenFallback) ??
+      localStorage.getItem(STORAGE_KEYS.supabaseAuthTokenLegacy) ??
+      localStorage.getItem(STORAGE_KEYS.supabaseAuthTokenLegacyFallback)
     if (!raw) return null
 
     const parsed = JSON.parse(raw) as
@@ -231,7 +296,9 @@ function mapSupabaseSession(session: Session): AuthSession {
   const avatarPath = sanitizeAvatarPath(cachedProfile?.avatar_url) ?? sanitizeAvatarPath(metadata.avatar_path)
   const avatarUrl = sanitizeAvatarUrl(cachedProfile?.avatar_url) ?? sanitizeAvatarUrl(metadata.avatar_url)
   const metadataOnboarding = metadata.onboarding as Partial<OnboardingState> | undefined
-  const onboarding = metadataOnboarding
+  const onboarding = cachedProfile
+    ? createOnboardingFromProfile(cachedProfile, name)
+    : metadataOnboarding
     ? {
         ...createInitialOnboarding({ fullName: name, completed: Boolean(metadataOnboarding.completed) }),
         ...metadataOnboarding,
@@ -263,6 +330,28 @@ function mapSupabaseSession(session: Session): AuthSession {
   }
 }
 
+function mergeProfileIntoSession(session: AuthSession, profile: ProfileSnapshot): AuthSession {
+  const accountStatus = profile.account_status ?? 'active'
+  const avatarValue = profile.avatar_url ?? null
+
+  return {
+    ...session,
+    user: {
+      ...session.user,
+      name: profile.full_name ?? session.user.name,
+      email: profile.email ?? session.user.email,
+      username: profile.username ?? session.user.username,
+      roleLabel: profile.role_label ?? session.user.roleLabel,
+      accountStatus,
+      mustResetPassword: profile.must_reset_password ?? session.user.mustResetPassword,
+      jobTitle: profile.job_title ?? session.user.jobTitle,
+      avatarUrl: sanitizeAvatarUrl(avatarValue) ?? session.user.avatarUrl,
+      avatarPath: sanitizeAvatarPath(avatarValue) ?? session.user.avatarPath,
+      onboarding: createOnboardingFromProfile(profile, profile.full_name ?? session.user.name),
+    },
+  }
+}
+
 function createInitialAuthState(): AuthState {
   const storedSession = extractStoredSupabaseSession()
   if (!storedSession) {
@@ -285,12 +374,50 @@ function createInitialAuthState(): AuthState {
   }
 }
 
+async function resolveProfileTenantSnapshot(userId: string): Promise<ProfileTenantSnapshot | null> {
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('organization_id, active_organization_id')
+    .eq('id', userId)
+    .maybeSingle()
+
+  if (profile?.organization_id) {
+    return {
+      organization_id: profile.organization_id,
+      active_organization_id: profile.active_organization_id ?? profile.organization_id,
+    }
+  }
+
+  const { data: membership } = await supabase
+    .from('organization_members')
+    .select('organization_id')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (!membership?.organization_id) return null
+
+  return {
+    organization_id: membership.organization_id,
+    active_organization_id: membership.organization_id,
+  }
+}
+
 async function upsertProfileRecord(user: User) {
   const avatarUrl = sanitizeAvatarUrl(user.avatarUrl)
   const avatarPath = sanitizeAvatarPath(user.avatarPath)
+  const tenantSnapshot = await resolveProfileTenantSnapshot(user.id)
+  const onboarding = user.onboarding ?? createInitialOnboarding({ fullName: user.name, completed: false })
 
   const { error } = await supabase.from('profiles').upsert({
     id: user.id,
+    ...(tenantSnapshot?.organization_id
+      ? {
+          organization_id: tenantSnapshot.organization_id,
+          active_organization_id: tenantSnapshot.active_organization_id ?? tenantSnapshot.organization_id,
+        }
+      : {}),
     full_name: user.name,
     username: user.username ?? generateUsernameCandidate(user.name, user.email),
     role_label: user.roleLabel ?? null,
@@ -298,6 +425,12 @@ async function upsertProfileRecord(user: User) {
     job_title: user.jobTitle ?? null,
     email: user.email,
     avatar_url: avatarUrl ?? avatarPath ?? null,
+    onboarding_completed: onboarding.completed,
+    onboarding_step: onboarding.currentStep,
+    onboarding_role: onboarding.role || null,
+    onboarding_work_function: onboarding.workFunction || null,
+    onboarding_use_case: onboarding.useCase || null,
+    onboarding_tools: onboarding.tools,
   })
 
   if (error) throw error
@@ -312,25 +445,38 @@ function shouldPersistProfile(hasProfile: boolean, user: User) {
   return hasProfile || user.onboarding?.completed === true
 }
 
-async function fetchProfileStatus(userId: string) {
-  const { data, error } = await supabase.from('profiles').select('id').eq('id', userId).maybeSingle()
-  if (error) return false
-  return Boolean(data)
+async function attachOrganizationToProfileSnapshot(profile: ProfileSnapshot): Promise<ProfileSnapshot> {
+  const organizationId = profile.active_organization_id ?? profile.organization_id
+  if (!organizationId) return profile
+
+  const { data } = await supabase
+    .from('organizations')
+    .select('name, industry')
+    .eq('id', organizationId)
+    .maybeSingle()
+
+  return {
+    ...profile,
+    organization_name: data?.name ?? profile.organization_name ?? null,
+    organization_industry: data?.industry ?? profile.organization_industry ?? null,
+  }
 }
 
 async function fetchProfileSnapshot(userId: string) {
-  const baseSelect = 'id, full_name, email, avatar_url, username, role_label, job_title'
+  const baseSelect = 'id, organization_id, active_organization_id, full_name, email, avatar_url, username, role_label, job_title'
   const statusSelect = 'account_status, deactivated_at, deleted_at'
-  const withResetSelect = `${baseSelect}, ${statusSelect}, must_reset_password`
+  const onboardingSelect =
+    'onboarding_completed, onboarding_step, onboarding_role, onboarding_work_function, onboarding_use_case, onboarding_tools'
+  const withResetSelect = `${baseSelect}, ${statusSelect}, must_reset_password, ${onboardingSelect}`
 
   const withResetResult = await supabase.from('profiles').select(withResetSelect).eq('id', userId).maybeSingle()
   if (!withResetResult.error && withResetResult.data) {
-    return withResetResult.data as ProfileSnapshot
+    return attachOrganizationToProfileSnapshot(withResetResult.data as ProfileSnapshot)
   }
 
   const shouldRetryWithoutResetField =
     Boolean(withResetResult.error) &&
-    /must_reset_password|account_status|deactivated_at|deleted_at|column .* does not exist|schema cache/i.test(
+    /must_reset_password|account_status|deactivated_at|deleted_at|onboarding_|active_organization_id|organization_id|column .* does not exist|schema cache/i.test(
       withResetResult.error?.message ?? '',
     )
 
@@ -341,13 +487,19 @@ async function fetchProfileSnapshot(userId: string) {
   const fallbackResult = await supabase.from('profiles').select(baseSelect).eq('id', userId).maybeSingle()
   if (fallbackResult.error || !fallbackResult.data) return null
 
-  return {
+  return attachOrganizationToProfileSnapshot({
     ...(fallbackResult.data as Omit<ProfileSnapshot, 'must_reset_password'>),
     account_status: 'active',
     deactivated_at: null,
     deleted_at: null,
     must_reset_password: false,
-  } as ProfileSnapshot
+    onboarding_completed: false,
+    onboarding_step: 'name',
+    onboarding_role: null,
+    onboarding_work_function: null,
+    onboarding_use_case: null,
+    onboarding_tools: [],
+  } as ProfileSnapshot)
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -376,7 +528,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       await supabase.auth.signOut().catch(() => undefined)
       localStorage.removeItem(STORAGE_KEYS.supabaseAuthToken)
+      localStorage.removeItem(STORAGE_KEYS.supabaseAuthTokenFallback)
       localStorage.removeItem(STORAGE_KEYS.supabaseAuthTokenLegacy)
+      localStorage.removeItem(STORAGE_KEYS.supabaseAuthTokenLegacyFallback)
       clearCachedProfile()
       purgeCachedClientDataOnLogout()
       clearAccessNotice()
@@ -402,11 +556,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'RESTORE_SESSION', payload: mapSupabaseSession(data.session) })
     })
 
-    const { data } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, nextSession) => {
+    const { data } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, nextSession) => {
       if (!mounted) return
+
+      if (event === 'PASSWORD_RECOVERY') {
+        markPasswordRecoveryActive()
+      }
 
       if (!nextSession) {
         clearCachedProfile()
+        clearPasswordRecoveryActive()
         dispatch({ type: 'CLEAR_SESSION' })
         return
       }
@@ -429,9 +588,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false
     dispatch({ type: 'SET_PROFILE_STATUS', payload: { hasProfile: state.hasProfile, loading: true } })
 
-    void fetchProfileStatus(state.session.user.id).then((hasProfile) => {
+    void fetchProfileSnapshot(state.session.user.id).then((profile) => {
       if (cancelled) return
-      dispatch({ type: 'SET_PROFILE_STATUS', payload: { hasProfile, loading: false } })
+
+      if (!profile) {
+        dispatch({ type: 'SET_PROFILE_STATUS', payload: { hasProfile: false, loading: false } })
+        return
+      }
+
+      const accountStatus = profile.account_status ?? 'active'
+      if (accountStatus !== 'active') {
+        void logout({ accessNotice: getAccessDeniedMessage(accountStatus) })
+        return
+      }
+
+      const nextSession = mergeProfileIntoSession(state.session!, profile)
+      writeCachedProfile({
+        id: state.session!.user.id,
+        ...profile,
+        account_status: accountStatus,
+        deactivated_at: profile.deactivated_at ?? null,
+        deleted_at: profile.deleted_at ?? null,
+      })
+      dispatch({ type: 'SET_SESSION', payload: nextSession })
+      dispatch({ type: 'SET_PROFILE_STATUS', payload: { hasProfile: true, loading: false } })
     })
 
     return () => {
@@ -444,7 +624,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     let cancelled = false
     const userId = state.session.user.id
-    const currentUser = state.session.user
 
     void fetchProfileSnapshot(userId).then((profile) => {
       if (cancelled || !profile) return
@@ -458,6 +637,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const avatarValue = profile.avatar_url ?? null
       const nextSnapshotKey = JSON.stringify({
         userId,
+        organization_id: profile.organization_id ?? null,
+        active_organization_id: profile.active_organization_id ?? null,
+        organization_name: profile.organization_name ?? null,
+        organization_industry: profile.organization_industry ?? null,
         full_name: profile.full_name ?? null,
         email: profile.email ?? null,
         username: profile.username ?? null,
@@ -466,6 +649,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         must_reset_password: profile.must_reset_password ?? false,
         job_title: profile.job_title ?? null,
         avatar_url: avatarValue,
+        onboarding_completed: profile.onboarding_completed ?? false,
+        onboarding_step: profile.onboarding_step ?? 'organization',
+        onboarding_role: profile.onboarding_role ?? null,
+        onboarding_work_function: profile.onboarding_work_function ?? null,
+        onboarding_use_case: profile.onboarding_use_case ?? null,
+        onboarding_tools: profile.onboarding_tools ?? [],
       })
 
       if (lastProfileSnapshotKeyRef.current === nextSnapshotKey) return
@@ -478,21 +667,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         deactivated_at: profile.deactivated_at ?? null,
         deleted_at: profile.deleted_at ?? null,
       })
-      const nextSession: AuthSession = {
-        ...state.session!,
-        user: {
-          ...currentUser,
-          name: profile.full_name ?? currentUser.name,
-          email: profile.email ?? currentUser.email,
-          username: profile.username ?? currentUser.username,
-          roleLabel: profile.role_label ?? currentUser.roleLabel,
-          accountStatus,
-          mustResetPassword: profile.must_reset_password ?? currentUser.mustResetPassword,
-          jobTitle: profile.job_title ?? currentUser.jobTitle,
-          avatarUrl: sanitizeAvatarUrl(avatarValue) ?? currentUser.avatarUrl,
-          avatarPath: sanitizeAvatarPath(avatarValue) ?? currentUser.avatarPath,
-        },
-      }
+      const nextSession = mergeProfileIntoSession(state.session!, profile)
 
       dispatch({ type: 'SET_SESSION', payload: nextSession })
     })
@@ -519,7 +694,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      setSession(mapSupabaseSession(data.session))
+      const nextSession = profile
+        ? mergeProfileIntoSession(mapSupabaseSession(data.session), profile)
+        : mapSupabaseSession(data.session)
+      setSession(nextSession)
     },
     [setSession],
   )
@@ -536,6 +714,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     setSession(mapSupabaseSession(data.session))
   }, [setSession])
+
+  const signInWithSocialProvider = useCallback(async (provider: SocialAuthProvider) => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: getOAuthRedirectUrl(),
+      },
+    })
+
+    if (error) throw error
+  }, [])
+
+  const sendPasswordResetEmail = useCallback(async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: getPasswordResetRedirectUrl(),
+    })
+
+    if (error) throw error
+  }, [])
 
   const updateCurrentUser = useCallback(
     (updates: Partial<User>) => {
@@ -623,12 +820,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       profileLoading: state.profileLoading,
       login,
       register,
+      signInWithSocialProvider,
+      sendPasswordResetEmail,
       updateCurrentUser,
       updateOnboarding,
       completeOnboarding,
       logout,
     }),
-    [completeOnboarding, login, logout, register, state.hasProfile, state.loading, state.profileLoading, state.session, updateCurrentUser, updateOnboarding],
+    [
+      completeOnboarding,
+      login,
+      logout,
+      register,
+      sendPasswordResetEmail,
+      signInWithSocialProvider,
+      state.hasProfile,
+      state.loading,
+      state.profileLoading,
+      state.session,
+      updateCurrentUser,
+      updateOnboarding,
+    ],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

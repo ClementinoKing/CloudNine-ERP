@@ -130,7 +130,7 @@ type HeaderSearchItem = {
 
 const HEADER_SEARCH_CACHE_TTL_MS = 5 * 60 * 1000
 const HEADER_SEARCH_RELOAD_DEBOUNCE_MS = 250
-const HEADER_SEARCH_CACHE_KEY = 'contas.header-search.cache.v1'
+const HEADER_SEARCH_CACHE_KEY = 'cloudnine.header-search.cache.v1'
 
 function getHeaderSearchCacheKey(userId: string) {
   return `${HEADER_SEARCH_CACHE_KEY}:${userId}`
@@ -592,20 +592,20 @@ export function AppHeader({
 
   useEffect(() => {
     const handleOpenCreateProject = () => openCreateProjectModal()
-    window.addEventListener('contas:open-create-project', handleOpenCreateProject as EventListener)
-    return () => window.removeEventListener('contas:open-create-project', handleOpenCreateProject as EventListener)
+    window.addEventListener('cloudnine:open-create-project', handleOpenCreateProject as EventListener)
+    return () => window.removeEventListener('cloudnine:open-create-project', handleOpenCreateProject as EventListener)
   }, [openCreateProjectModal])
 
   useEffect(() => {
     const handleOpenCreateTask = () => setCreateTaskOpen(true)
     const handleOpenInvitePeople = () => setInviteOpen(true)
 
-    window.addEventListener('contas:open-create-task', handleOpenCreateTask as EventListener)
-    window.addEventListener('contas:open-invite-people', handleOpenInvitePeople as EventListener)
+    window.addEventListener('cloudnine:open-create-task', handleOpenCreateTask as EventListener)
+    window.addEventListener('cloudnine:open-invite-people', handleOpenInvitePeople as EventListener)
 
     return () => {
-      window.removeEventListener('contas:open-create-task', handleOpenCreateTask as EventListener)
-      window.removeEventListener('contas:open-invite-people', handleOpenInvitePeople as EventListener)
+      window.removeEventListener('cloudnine:open-create-task', handleOpenCreateTask as EventListener)
+      window.removeEventListener('cloudnine:open-invite-people', handleOpenInvitePeople as EventListener)
     }
   }, [])
 
@@ -615,10 +615,10 @@ export function AppHeader({
       if (detail?.table !== 'notifications') return
       void fetchNotificationItems()
     }
-    window.addEventListener('contas:realtime-change', onRealtimeChange as EventListener)
+    window.addEventListener('cloudnine:realtime-change', onRealtimeChange as EventListener)
 
     return () => {
-      window.removeEventListener('contas:realtime-change', onRealtimeChange as EventListener)
+      window.removeEventListener('cloudnine:realtime-change', onRealtimeChange as EventListener)
     }
   }, [fetchNotificationItems])
 
@@ -639,9 +639,9 @@ export function AppHeader({
       }, HEADER_SEARCH_RELOAD_DEBOUNCE_MS)
     }
 
-    window.addEventListener('contas:realtime-change', onRealtimeChange as EventListener)
+    window.addEventListener('cloudnine:realtime-change', onRealtimeChange as EventListener)
     return () => {
-      window.removeEventListener('contas:realtime-change', onRealtimeChange as EventListener)
+      window.removeEventListener('cloudnine:realtime-change', onRealtimeChange as EventListener)
       if (searchReloadTimerRef.current !== null) {
         window.clearTimeout(searchReloadTimerRef.current)
         searchReloadTimerRef.current = null
@@ -957,8 +957,8 @@ export function AppHeader({
       return
     }
 
-    sessionStorage.setItem('contas.projects.last-created-id', data.id)
-    window.dispatchEvent(new CustomEvent('contas:project-created', { detail: { projectId: data.id } }))
+    sessionStorage.setItem('cloudnine.projects.last-created-id', data.id)
+    window.dispatchEvent(new CustomEvent('cloudnine:project-created', { detail: { projectId: data.id } }))
     handleProjectModalChange(false)
     navigate(`/dashboard/projects/${data.id}`)
   }

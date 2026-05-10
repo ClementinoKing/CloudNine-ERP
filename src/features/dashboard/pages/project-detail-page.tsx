@@ -182,7 +182,7 @@ export function ProjectDetailPage() {
     }
   }, [])
 
-  const cacheKey = useMemo(() => (projectId ? `contas:project-detail:${projectId}` : ''), [projectId])
+  const cacheKey = useMemo(() => (projectId ? `cloudnine:project-detail:${projectId}` : ''), [projectId])
 
   const loadProject = useCallback(async (options?: { silent?: boolean }) => {
     if (!projectId) return
@@ -309,9 +309,9 @@ export function ProjectDetailPage() {
         void loadProject({ silent: true })
       }, 250)
     }
-    window.addEventListener('contas:realtime-change', onRealtimeChange as EventListener)
+    window.addEventListener('cloudnine:realtime-change', onRealtimeChange as EventListener)
     return () => {
-      window.removeEventListener('contas:realtime-change', onRealtimeChange as EventListener)
+      window.removeEventListener('cloudnine:realtime-change', onRealtimeChange as EventListener)
       if (realtimeRefreshTimerRef.current !== null) {
         window.clearTimeout(realtimeRefreshTimerRef.current)
       }
@@ -535,7 +535,7 @@ export function ProjectDetailPage() {
     setEditProjectSubmitting(false)
     setEditProjectOpen(false)
     updateBackgroundSyncState('saved')
-    window.dispatchEvent(new CustomEvent('contas:realtime-change', { detail: { table: 'projects', eventType: 'manual' } }))
+    window.dispatchEvent(new CustomEvent('cloudnine:realtime-change', { detail: { table: 'projects', eventType: 'manual' } }))
   }
 
   const handleTaskCreated = useCallback(

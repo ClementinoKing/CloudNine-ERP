@@ -4,7 +4,7 @@ import { useAuth } from '@/features/auth/context/auth-context'
 import { supabase } from '@/lib/supabase'
 
 const HEARTBEAT_MS = 30000
-const PRESENCE_SESSION_KEY_STORAGE = 'contas.presence.session_key'
+const PRESENCE_SESSION_KEY_STORAGE = 'cloudnine.presence.session_key'
 
 export function usePresenceHeartbeat() {
   const { isAuthenticated, currentUser } = useAuth()

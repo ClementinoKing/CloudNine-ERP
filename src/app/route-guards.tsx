@@ -1,9 +1,16 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 
 import { useAuth } from '@/features/auth/context/auth-context'
+import {
+  canAccessOnboardingStep,
+  getFirstIncompleteOnboardingStep,
+  getOnboardingPath,
+  getOnboardingStepFromPathname,
+} from '@/features/onboarding/lib/onboarding-routes'
 import { STORAGE_KEYS } from '@/lib/storage'
 
-const LAST_DASHBOARD_PATH_KEY = 'contas.last-dashboard-path'
+const LAST_DASHBOARD_PATH_KEY = 'cloudnine.last-dashboard-path'
+const RESET_PASSWORD_PATH = '/reset-password'
 
 function getLastDashboardPath() {
   const savedPath = sessionStorage.getItem(LAST_DASHBOARD_PATH_KEY)
@@ -12,6 +19,14 @@ function getLastDashboardPath() {
 
 function hasPersistedSupabaseSession() {
   return Boolean(localStorage.getItem(STORAGE_KEYS.supabaseAuthToken) ?? localStorage.getItem(STORAGE_KEYS.supabaseAuthTokenLegacy))
+}
+
+function hasActivePasswordRecoverySession() {
+  return sessionStorage.getItem(STORAGE_KEYS.passwordRecoveryActive) === 'true'
+}
+
+function shouldShowResetPasswordPage(currentUserMustResetPassword?: boolean) {
+  return hasActivePasswordRecoverySession() || Boolean(currentUserMustResetPassword)
 }
 
 function AuthGateLoadingScreen() {
@@ -42,6 +57,7 @@ export function ProtectedRoute() {
   const { isAuthenticated, loading, profileLoading, hasProfile, currentUser } = useAuth()
   const location = useLocation()
   const persistedSessionExists = hasPersistedSupabaseSession()
+  const resetPasswordRequired = shouldShowResetPasswordPage(currentUser?.mustResetPassword)
 
   if (loading || profileLoading) {
     return persistedSessionExists ? <AuthGateLoadingScreen /> : null
@@ -51,13 +67,29 @@ export function ProtectedRoute() {
     return <Navigate to='/login' state={{ from: location }} replace />
   }
 
-  if (currentUser?.mustResetPassword && location.pathname !== '/reset-password') {
-    return <Navigate to='/reset-password' replace />
+  if (resetPasswordRequired) {
+    if (location.pathname !== RESET_PASSWORD_PATH) {
+      return <Navigate to={RESET_PASSWORD_PATH} replace />
+    }
+
+    return <Outlet />
   }
 
   // New user — no profile row yet, send them to onboarding unless already there
   if (!hasProfile && !location.pathname.startsWith('/onboarding')) {
     return <Navigate to='/onboarding/organization' replace />
+  }
+
+  if (hasProfile && currentUser?.onboarding && !currentUser.onboarding.completed) {
+    const resumePath = getOnboardingPath(getFirstIncompleteOnboardingStep(currentUser.onboarding))
+    if (!location.pathname.startsWith('/onboarding')) {
+      return <Navigate to={resumePath} replace />
+    }
+
+    const requestedStep = getOnboardingStepFromPathname(location.pathname)
+    if (requestedStep && !canAccessOnboardingStep(requestedStep, currentUser.onboarding)) {
+      return <Navigate to={resumePath} replace />
+    }
   }
 
   return <Outlet />
@@ -71,13 +103,44 @@ export function AuthRedirectRoute() {
   }
 
   if (isAuthenticated) {
-    if (currentUser?.mustResetPassword) {
-      return <Navigate to='/reset-password' replace />
+    if (shouldShowResetPasswordPage(currentUser?.mustResetPassword)) {
+      return <Navigate to={RESET_PASSWORD_PATH} replace />
     }
     if (!hasProfile) {
       return <Navigate to='/onboarding/organization' replace />
     }
+    if (currentUser?.onboarding && !currentUser.onboarding.completed) {
+      return <Navigate to={getOnboardingPath(getFirstIncompleteOnboardingStep(currentUser.onboarding))} replace />
+    }
     return <Navigate to={getLastDashboardPath()} replace />
+  }
+
+  return <Outlet />
+}
+
+export function RootRoute() {
+  const { isAuthenticated, loading, profileLoading, hasProfile, currentUser } = useAuth()
+  const location = useLocation()
+
+  if (loading || profileLoading) {
+    return <AuthGateLoadingScreen />
+  }
+
+  if (isAuthenticated) {
+    if (shouldShowResetPasswordPage(currentUser?.mustResetPassword)) {
+      return <Navigate to={RESET_PASSWORD_PATH} replace />
+    }
+    if (!hasProfile) {
+      return <Navigate to='/onboarding/organization' replace />
+    }
+    if (currentUser?.onboarding && !currentUser.onboarding.completed) {
+      return <Navigate to={getOnboardingPath(getFirstIncompleteOnboardingStep(currentUser.onboarding))} replace />
+    }
+    return <Navigate to={getLastDashboardPath()} replace />
+  }
+
+  if (location.pathname === '/') {
+    return <Navigate to='/login' replace />
   }
 
   return <Outlet />

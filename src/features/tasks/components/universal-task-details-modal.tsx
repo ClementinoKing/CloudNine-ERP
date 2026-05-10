@@ -93,7 +93,7 @@ type CommentRow = {
 }
 type VoicePayload = { file: File; previewUrl: string; durationMs: number }
 
-const COMMENT_PAYLOAD_PREFIX = '__contas_comment_v1__:'
+const COMMENT_PAYLOAD_PREFIX = '__cloudnine_comment_v1__:'
 const RECORDING_VISUALIZER_BARS = 20
 const PLAYBACK_VISUALIZER_BARS = 22
 const TASK_MODAL_CACHE_TTL_MS = 60_000
@@ -679,8 +679,8 @@ export function UniversalTaskDetailsModal() {
       setTaskId(nextTaskId)
       setOpen(true)
     }
-    window.addEventListener('contas:open-task-modal', handler as EventListener)
-    return () => window.removeEventListener('contas:open-task-modal', handler as EventListener)
+    window.addEventListener('cloudnine:open-task-modal', handler as EventListener)
+    return () => window.removeEventListener('cloudnine:open-task-modal', handler as EventListener)
   }, [])
 
   useEffect(() => {

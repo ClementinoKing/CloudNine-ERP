@@ -11,6 +11,7 @@ import { notify } from '@/lib/notify'
 
 import { AuthInputGroup } from '../components/auth-input-group'
 import { AuthLayout } from '../components/auth-layout'
+import { SocialAuthButtons } from '../components/social-auth-buttons'
 import { useAuth } from '../context/auth-context'
 
 const registerSchema = z
@@ -100,7 +101,7 @@ export function RegisterPage() {
 
   return (
     <AuthLayout title='Create your account' subtitle='Enter your email and choose a password to get started.'>
-      <form className='space-y-4' onSubmit={handleSubmit(onSubmit)}>
+      <form className='space-y-3' onSubmit={handleSubmit(onSubmit)}>
         <AuthInputGroup label='Email' htmlFor='email' error={errors.email?.message}>
           <Input id='email' type='email' autoComplete='email' placeholder='name@company.com' {...register('email')} />
         </AuthInputGroup>
@@ -124,6 +125,10 @@ export function RegisterPage() {
           {submitting ? 'Creating account...' : 'Create account'}
         </Button>
       </form>
+
+      <div className='mt-6'>
+        <SocialAuthButtons intent='signup' disabled={submitting} />
+      </div>
 
       <p className='mt-6 text-sm text-muted-foreground'>
         Already have an account?{' '}

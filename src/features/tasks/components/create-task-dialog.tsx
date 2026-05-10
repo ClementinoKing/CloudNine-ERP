@@ -11,6 +11,7 @@ import { MentionRichTextEditor, type MentionRichTextEditorHandle } from '@/compo
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useAuth } from '@/features/auth/context/auth-context'
 import { dispatchNotificationEmails } from '@/features/notifications/lib/email-delivery'
+import { useOrganization } from '@/features/organization/context/organization-context'
 import {
   FALLBACK_STATUS_OPTIONS,
   legacyBoardColumnForStatusKey,
@@ -63,6 +64,38 @@ function formatLocalDate(value: Date) {
   return `${year}-${month}-${day}`
 }
 
+function isPersistedStatusId(value?: string | null) {
+  return Boolean(value && !value.startsWith('fallback-'))
+}
+
+type SupabaseErrorLike = {
+  code?: unknown
+  details?: unknown
+  hint?: unknown
+  message?: unknown
+  status?: unknown
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function taskCreationErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message
+  if (!isRecord(error)) return 'Task could not be created.'
+
+  const supabaseError = error as SupabaseErrorLike
+  const message = typeof supabaseError.message === 'string' ? supabaseError.message : ''
+  const code = typeof supabaseError.code === 'string' ? supabaseError.code : ''
+  const status = typeof supabaseError.status === 'number' ? supabaseError.status : null
+
+  if (status === 404 || code === 'PGRST202' || /could not find the function/i.test(message)) {
+    return 'Task creation service is not available in this browser session. Refresh the app and try again.'
+  }
+
+  return message || 'Task could not be created.'
+}
+
 export type CreatedTaskPayload = {
   id: string
   parentTaskId?: string
@@ -108,6 +141,7 @@ export function CreateTaskDialog({
   lockProjectSelection?: boolean
 }) {
   const { currentUser } = useAuth()
+  const { currentMembership, currentOrganizationId, loading: organizationLoading } = useOrganization()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const descriptionEditorRef = useRef<MentionRichTextEditorHandle | null>(null)
 
@@ -243,6 +277,18 @@ export function CreateTaskDialog({
       setErrorMessage('Task title is required.')
       return
     }
+    if (!currentUser?.id) {
+      setErrorMessage('Sign in again before creating a task.')
+      return
+    }
+    if (organizationLoading) {
+      setErrorMessage('Organization context is still loading. Try again in a moment.')
+      return
+    }
+    if (!currentMembership) {
+      setErrorMessage('Select a valid organization before creating a task.')
+      return
+    }
     const nextParentTaskId = taskType === 'subtask' ? parentTaskId || initialParentTaskId || '' : ''
     if (taskType === 'subtask' && !nextParentTaskId) {
       setErrorMessage('Please select a parent task.')
@@ -313,10 +359,11 @@ export function CreateTaskDialog({
       const selectedStatus = availableStatuses.find((status) => status.id === selectedStatusId) ?? availableStatuses[0] ?? FALLBACK_STATUS_OPTIONS[0]
       const legacyBoardColumn = legacyBoardColumnForStatusKey(selectedStatus?.key)
       const { data, error } = await supabase.rpc('create_task_with_recurrence', {
+        p_organization_id: currentOrganizationId,
         p_title: trimmedTitle,
         p_parent_task_id: taskType === 'subtask' ? nextParentTaskId : null,
         p_description: description.trim() || null,
-        p_status_id: selectedStatus?.id ?? null,
+        p_status_id: isPersistedStatusId(selectedStatus?.id) ? selectedStatus.id : null,
         p_status: selectedStatus?.key ?? 'planned',
         p_board_column: legacyBoardColumn,
         p_project_id: projectId || null,
@@ -387,7 +434,7 @@ export function CreateTaskDialog({
 
       handleOpenChange(false)
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Task could not be created.')
+      setErrorMessage(taskCreationErrorMessage(error))
     } finally {
       setCreating(false)
     }
@@ -421,6 +468,10 @@ export function CreateTaskDialog({
     isRecurring,
     recurrenceFrequency,
     recurrenceEndAt,
+    currentOrganizationId,
+    currentMembership,
+    currentUser?.id,
+    organizationLoading,
   ])
 
   const assigneeOptions = useMemo(() => {
@@ -451,6 +502,14 @@ export function CreateTaskDialog({
       .slice(0, 2)
       .map((part) => part[0]?.toUpperCase() ?? '')
       .join('') || 'U'
+  const taskCreationDisabled = creating || organizationLoading || !currentMembership || !currentUser?.id
+  const submitLabel = creating
+    ? 'Creating...'
+    : organizationLoading
+      ? 'Loading...'
+      : taskType === 'subtask'
+        ? 'Create Subtask'
+        : 'Create Task'
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -873,8 +932,8 @@ export function CreateTaskDialog({
               <Button type='button' variant='outline' onClick={() => handleOpenChange(false)} disabled={creating}>
                 Cancel
               </Button>
-              <Button type='button' onClick={() => void handleSubmit()} disabled={creating} className='min-w-[132px]'>
-                {creating ? 'Creating...' : taskType === 'subtask' ? 'Create Subtask' : 'Create Task'}
+              <Button type='button' onClick={() => void handleSubmit()} disabled={taskCreationDisabled} className='min-w-[132px]'>
+                {submitLabel}
               </Button>
             </DialogFooter>
           </div>

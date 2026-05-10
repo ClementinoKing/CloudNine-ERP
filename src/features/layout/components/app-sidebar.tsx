@@ -12,7 +12,7 @@ import { useUnreadNotifications } from '@/features/layout/hooks/use-unread-notif
 import { cn } from '@/lib/utils'
 import { SIDEBAR_SECTIONS } from './navigation-items'
 
-const THEME_STORAGE_KEY = 'contas.ui.theme'
+const THEME_STORAGE_KEY = 'cloudnine.ui.theme'
 const THEME_TRANSITION_CLASS = 'theme-transition'
 function SidebarContent({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
   const navigate = useNavigate()

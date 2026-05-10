@@ -1,5 +1,5 @@
-const UNREAD_NOTIFICATIONS_CACHE_KEY = 'contas.notifications.unread-count.v1'
-const UNREAD_NOTIFICATIONS_EVENT = 'contas:notifications-unread-updated'
+const UNREAD_NOTIFICATIONS_CACHE_KEY = 'cloudnine.notifications.unread-count.v1'
+const UNREAD_NOTIFICATIONS_EVENT = 'cloudnine:notifications-unread-updated'
 
 export function getCachedUnreadCount() {
   const raw = localStorage.getItem(UNREAD_NOTIFICATIONS_CACHE_KEY)

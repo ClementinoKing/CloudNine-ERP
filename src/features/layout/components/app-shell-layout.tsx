@@ -12,7 +12,7 @@ import { DesktopSidebar, MobileSidebar } from './app-sidebar'
 import { GroupChatWidget } from './group-chat-widget'
 import { UniversalTaskDetailsModal } from '@/features/tasks/components/universal-task-details-modal'
 
-const LAST_DASHBOARD_PATH_KEY = 'contas.last-dashboard-path'
+const LAST_DASHBOARD_PATH_KEY = 'cloudnine.last-dashboard-path'
 
 export function AppShellLayout() {
   const location = useLocation()
