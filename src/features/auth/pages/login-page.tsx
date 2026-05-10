@@ -127,7 +127,7 @@ export function LoginPage() {
         <SocialAuthButtons intent='signin' disabled={submitting} />
       </div>
 
-      <p className='mt-5 text-sm text-muted-foreground'>
+      <p className='mt-5 text-center text-sm text-muted-foreground'>
         Do not have an account?{' '}
         <Link className='font-medium text-primary hover:underline' to='/register'>
           Create one

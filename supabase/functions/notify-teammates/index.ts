@@ -9,8 +9,18 @@ import {
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, cache-control, pragma, accept, accept-language, x-supabase-api-version',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
+
+function corsHeadersForRequest(req: Request) {
+  const requestedHeaders = req.headers.get('Access-Control-Request-Headers')
+  if (!requestedHeaders) return corsHeaders
+
+  return {
+    ...corsHeaders,
+    'Access-Control-Allow-Headers': requestedHeaders,
+  }
 }
 
 type NotifyPayload = {
@@ -25,7 +35,7 @@ type NotifyPayload = {
   messagePreview?: string
   contextKind?: NotificationContextKind
   appUrl?: string
-  notificationId: string
+  notificationId?: string
 }
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? ''
@@ -87,6 +97,9 @@ async function sendNotificationEmail(input: {
 }
 
 function resolveBearerToken(req: Request) {
+  const internalDispatchToken = req.headers.get('x-cloudnine-dispatch-token') ?? ''
+  if (internalDispatchToken) return internalDispatchToken.trim()
+
   const directAuthorization = req.headers.get('Authorization') ?? req.headers.get('authorization') ?? ''
   const forwardedAuthorization = req.headers.get('x-forwarded-authorization') ?? ''
   const candidate = directAuthorization || forwardedAuthorization
@@ -107,62 +120,14 @@ function emailTypeFromMetadata(metadata: Record<string, unknown> | null | undefi
   return null
 }
 
-Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
-
-  if (req.method !== 'POST') {
-    return json({ ok: false, message: 'Method not allowed.' }, 405)
-  }
-
-  const accessToken = resolveBearerToken(req)
-
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    return json({ ok: false, message: 'Missing Supabase environment variables.' }, 500)
-  }
-
-  let payload: NotifyPayload
-  try {
-    payload = (await req.json()) as NotifyPayload
-  } catch {
-    return json({ ok: false, message: 'Invalid JSON payload.' }, 400)
-  }
-
-  if (!payload.notificationId) {
-    return json({ ok: false, message: 'Missing required notification payload fields.' }, 400)
-  }
-
-  if (payload.type && !isNotificationEmailType(payload.type)) {
-    return json({ ok: false, message: 'Unsupported notification email type.' }, 400)
-  }
-
-  const isInternalDispatch = Boolean(INTERNAL_EMAIL_DISPATCH_TOKEN && accessToken === INTERNAL_EMAIL_DISPATCH_TOKEN)
-
-  const requesterId =
-    requesterIdFromBearerToken(accessToken) ??
-    req.headers.get('x-supabase-auth-user-id') ??
-    req.headers.get('x-supabase-auth-user') ??
-    null
-  if (!isInternalDispatch && !requesterId) {
-    return json({ ok: false, message: 'Unauthorized.' }, 401)
-  }
-
-  const serviceClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-
-  const { data: notificationRow, error: notificationError } = await serviceClient
-    .from('notifications')
-    .select('id, actor_id, recipient_id, task_id, metadata')
-    .eq('id', payload.notificationId)
-    .maybeSingle()
-
-  if (notificationError) {
-    return json({ ok: false, message: notificationError.message }, 500)
-  }
-
-  if (!notificationRow) {
-    return json({ ok: false, message: 'Notification not found.' }, 404)
-  }
+async function deliverNotificationEmail(
+  serviceClient: ReturnType<typeof createClient>,
+  payload: NotifyPayload,
+  notificationRow: { id: string; actor_id: string | null; recipient_id: string | null; task_id: string | null; metadata: Record<string, unknown> | null },
+  requesterId: string | null,
+  isInternalDispatch: boolean,
+) {
+  const notificationId = payload.notificationId ?? notificationRow.id
 
   if (!isInternalDispatch && notificationRow.actor_id !== requesterId) {
     return json({ ok: false, message: 'Only the actor can trigger this email.' }, 403)
@@ -244,7 +209,7 @@ Deno.serve(async (req) => {
   const { data: existingDelivery } = await serviceClient
     .from('notification_email_deliveries')
     .select('id, status')
-    .eq('notification_id', payload.notificationId)
+    .eq('notification_id', notificationId)
     .eq('recipient_email', recipientEmail)
     .eq('type', idempotencyType)
     .maybeSingle()
@@ -288,7 +253,7 @@ Deno.serve(async (req) => {
     const { data: createdDelivery, error: deliveryInsertError } = await serviceClient
       .from('notification_email_deliveries')
       .insert({
-        notification_id: payload.notificationId,
+        notification_id: notificationId,
         recipient_email: recipientEmail,
         type: idempotencyType,
         status: 'sent',
@@ -306,7 +271,7 @@ Deno.serve(async (req) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to send notification email.'
     console.error('notify-teammates provider error', {
-      notificationId: payload.notificationId,
+      notificationId,
       recipientEmail,
       type: idempotencyType,
       message,
@@ -325,7 +290,7 @@ Deno.serve(async (req) => {
     }
 
     await serviceClient.from('notification_email_deliveries').insert({
-      notification_id: payload.notificationId,
+      notification_id: notificationId,
       recipient_email: recipientEmail,
       type: idempotencyType,
       status: 'failed',
@@ -335,4 +300,101 @@ Deno.serve(async (req) => {
 
     return json({ ok: true, status: 'provider_error_recorded', message }, 200)
   }
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeadersForRequest(req) })
+  }
+
+  if (req.method !== 'POST') {
+    return json({ ok: false, message: 'Method not allowed.' }, 405)
+  }
+
+  const accessToken = resolveBearerToken(req)
+
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    return json({ ok: false, message: 'Missing Supabase environment variables.' }, 500)
+  }
+
+  let payload: NotifyPayload
+  try {
+    payload = (await req.json()) as NotifyPayload
+  } catch {
+    return json({ ok: false, message: 'Invalid JSON payload.' }, 400)
+  }
+
+  if (!payload.notificationId && !payload.taskId) {
+    return json({ ok: false, message: 'Missing required notification payload fields.' }, 400)
+  }
+
+  if (payload.type && !isNotificationEmailType(payload.type)) {
+    return json({ ok: false, message: 'Unsupported notification email type.' }, 400)
+  }
+
+  const isInternalDispatch = Boolean(INTERNAL_EMAIL_DISPATCH_TOKEN && accessToken === INTERNAL_EMAIL_DISPATCH_TOKEN)
+
+  const requesterId =
+    requesterIdFromBearerToken(accessToken) ??
+    req.headers.get('x-supabase-auth-user-id') ??
+    req.headers.get('x-supabase-auth-user') ??
+    null
+  if (!isInternalDispatch && !requesterId) {
+    return json({ ok: false, message: 'Unauthorized.' }, 401)
+  }
+
+  const serviceClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+  if (!payload.notificationId && payload.taskId) {
+    const { data: notificationRows, error: notificationError } = await serviceClient
+      .from('notifications')
+      .select('id, actor_id, recipient_id, task_id, metadata')
+      .eq('task_id', payload.taskId)
+      .order('created_at', { ascending: true })
+
+    if (notificationError) {
+      return json({ ok: false, message: notificationError.message }, 500)
+    }
+
+    const filteredRows = (notificationRows ?? []).filter((row) => {
+      const event = row.metadata?.event
+      return event === 'task_assigned' || event === 'task_mentioned'
+    })
+
+    if (!filteredRows.length) {
+      return json({ ok: false, message: 'No task notifications found.' }, 404)
+    }
+
+    if (!isInternalDispatch && requesterId) {
+      const actorFilteredRows = filteredRows.filter((row) => row.actor_id === requesterId)
+      if (actorFilteredRows.length > 0) {
+        for (const row of actorFilteredRows) {
+          await deliverNotificationEmail(serviceClient, payload, row, requesterId, isInternalDispatch)
+        }
+        return json({ ok: true, status: 'sent', count: actorFilteredRows.length })
+      }
+    }
+
+    for (const row of filteredRows) {
+      await deliverNotificationEmail(serviceClient, payload, row, requesterId, isInternalDispatch)
+    }
+
+    return json({ ok: true, status: 'sent', count: filteredRows.length })
+  }
+
+  const { data: notificationRow, error: notificationError } = await serviceClient
+    .from('notifications')
+    .select('id, actor_id, recipient_id, task_id, metadata')
+    .eq('id', payload.notificationId)
+    .maybeSingle()
+
+  if (notificationError) {
+    return json({ ok: false, message: notificationError.message }, 500)
+  }
+
+  if (!notificationRow) {
+    return json({ ok: false, message: 'Notification not found.' }, 404)
+  }
+
+  return deliverNotificationEmail(serviceClient, payload, notificationRow, requesterId, isInternalDispatch)
 })

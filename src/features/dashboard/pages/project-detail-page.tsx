@@ -23,6 +23,7 @@ import { DatePicker } from '@/components/ui/date-picker'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { GlobalSaveStatus } from '@/components/ui/global-save-status'
 import { Input } from '@/components/ui/input'
+import { useOrganization } from '@/features/organization/context/organization-context'
 import { DEFAULT_PROJECT_COLOR, PROJECT_COLOR_OPTIONS, normalizeProjectColor, projectDotStyle } from '@/features/projects/lib/project-colors'
 import { useAuth } from '@/features/auth/context/auth-context'
 import { CreateTaskDialog, type CreatedTaskPayload } from '@/features/tasks/components/create-task-dialog'
@@ -141,6 +142,7 @@ function ProjectDetailSkeleton() {
 
 export function ProjectDetailPage() {
   const { currentUser } = useAuth()
+  const { currentOrganizationId } = useOrganization()
   const { projectId } = useParams()
   const [project, setProject] = useState<ProjectDetail | null>(null)
   const [linkedTasks, setLinkedTasks] = useState<LinkedTask[]>([])
@@ -182,7 +184,10 @@ export function ProjectDetailPage() {
     }
   }, [])
 
-  const cacheKey = useMemo(() => (projectId ? `cloudnine:project-detail:${projectId}` : ''), [projectId])
+  const cacheKey = useMemo(
+    () => (projectId ? `cloudnine:project-detail:${currentOrganizationId}:${projectId}` : ''),
+    [currentOrganizationId, projectId],
+  )
 
   const loadProject = useCallback(async (options?: { silent?: boolean }) => {
     if (!projectId) return
@@ -196,14 +201,20 @@ export function ProjectDetailPage() {
     }
 
     const [projectResult, tasksResult, taskAssigneesResult, profilesResult, statusesResult] = await Promise.all([
-      supabase.from('projects').select('id, name, key, color, status, description, created_by, owner_id, start_date, end_date').eq('id', projectId).limit(1),
+      supabase
+        .from('projects')
+        .select('id, name, key, color, status, description, created_by, owner_id, start_date, end_date')
+        .eq('id', projectId)
+        .eq('organization_id', currentOrganizationId)
+        .limit(1),
       supabase
         .from('tasks')
         .select('id, parent_task_id, title, description, status, status_id, due_at, start_at, created_at, completed_at, priority, assigned_to, task_status:status_id(id,key,label)')
+        .eq('organization_id', currentOrganizationId)
         .eq('project_id', projectId)
         .order('created_at', { ascending: false }),
       supabase.from('task_assignees').select('task_id, assignee_id'),
-      supabase.from('profiles').select('id, full_name, avatar_url'),
+      supabase.from('profiles').select('id, full_name, avatar_url').eq('organization_id', currentOrganizationId),
       supabase.from('status').select('id,key,label,sort_order,project_id,is_default').or(`project_id.is.null,project_id.eq.${projectId}`).order('sort_order', { ascending: true }),
     ])
 
@@ -271,7 +282,7 @@ export function ProjectDetailPage() {
       }
       localStorage.setItem(cacheKey, JSON.stringify(payload))
     }
-  }, [cacheKey, projectId, updateBackgroundSyncState])
+  }, [cacheKey, currentOrganizationId, projectId, updateBackgroundSyncState])
 
   useEffect(() => {
     if (!projectId) return
@@ -519,6 +530,7 @@ export function ProjectDetailPage() {
       .from('projects')
       .update(payload)
       .eq('id', project.id)
+      .eq('organization_id', currentOrganizationId)
       .select('id, name, key, color, status, description, created_by, owner_id, start_date, end_date')
       .limit(1)
     const updatedProject = (data?.[0] as ProjectDetail | undefined) ?? null

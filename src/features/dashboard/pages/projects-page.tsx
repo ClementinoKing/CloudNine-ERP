@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/features/auth/context/auth-context'
+import { useOrganization } from '@/features/organization/context/organization-context'
 import { DEFAULT_PROJECT_COLOR, PROJECT_COLOR_OPTIONS, normalizeProjectColor, projectDotStyle } from '@/features/projects/lib/project-colors'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
@@ -84,16 +85,19 @@ const STATUS_TONE: Record<string, string> = {
   completed: 'border-emerald-400/35 bg-emerald-500/10 text-emerald-400',
 }
 
-const PROJECTS_CACHE_KEY = 'cloudnine.projects.page.v1'
 const PROJECTS_CACHE_TTL_MS = 3 * 60 * 1000
 const PROJECT_VIEW_STORAGE_KEY = 'cloudnine.projects.view.v1'
 const PROJECTS_LIST_PAGE_SIZE = 8
 
 type ProjectViewMode = 'cards' | 'list'
 
-function readProjectsCache(): ProjectsCachePayload | null {
+function getProjectsCacheKey(organizationId: string) {
+  return `cloudnine.projects.page.v1:${organizationId}`
+}
+
+function readProjectsCache(organizationId: string): ProjectsCachePayload | null {
   try {
-    const raw = localStorage.getItem(PROJECTS_CACHE_KEY)
+    const raw = localStorage.getItem(getProjectsCacheKey(organizationId))
     if (!raw) return null
     const parsed = JSON.parse(raw) as ProjectsCachePayload
     if (!parsed || typeof parsed.cachedAt !== 'number') return null
@@ -106,9 +110,9 @@ function readProjectsCache(): ProjectsCachePayload | null {
   }
 }
 
-function writeProjectsCache(payload: Omit<ProjectsCachePayload, 'cachedAt'>) {
+function writeProjectsCache(organizationId: string, payload: Omit<ProjectsCachePayload, 'cachedAt'>) {
   localStorage.setItem(
-    PROJECTS_CACHE_KEY,
+    getProjectsCacheKey(organizationId),
     JSON.stringify({
       cachedAt: Date.now(),
       ...payload,
@@ -248,7 +252,8 @@ function ProjectsListSkeleton() {
 export function ProjectsPage() {
   const navigate = useNavigate()
   const { currentUser } = useAuth()
-  const cached = readProjectsCache()
+  const { currentOrganizationId } = useOrganization()
+  const cached = readProjectsCache(currentOrganizationId)
   const [projects, setProjects] = useState<ProjectRow[]>(cached?.projects ?? [])
   const [tasks, setTasks] = useState<TaskRow[]>(cached?.tasks ?? [])
   const [taskAssignees, setTaskAssignees] = useState<Array<{ task_id: string; assignee_id: string }>>(cached?.taskAssignees ?? [])
@@ -276,27 +281,39 @@ export function ProjectsPage() {
 
   useEffect(() => {
     let cancelled = false
+    const cachedProjects = readProjectsCache(currentOrganizationId)
+    setProjects(cachedProjects?.projects ?? [])
+    setTasks(cachedProjects?.tasks ?? [])
+    setTaskAssignees(cachedProjects?.taskAssignees ?? [])
+    setProfiles(cachedProjects?.profiles ?? [])
+    setLoading(!cachedProjects)
 
     const loadProjects = async () => {
-      setLoading(true)
+      if (!cachedProjects) {
+        setLoading(true)
+      }
       const [projectsResult, tasksResult, assigneesResult, profilesResult] = await Promise.all([
-        supabase.from('projects').select('id, name, key, color, status, description, created_by, owner_id, start_date, end_date').order('name', { ascending: true }),
-        supabase.from('tasks').select('id, project_id, status, completed_at, created_at'),
+        supabase
+          .from('projects')
+          .select('id, name, key, color, status, description, created_by, owner_id, start_date, end_date')
+          .eq('organization_id', currentOrganizationId)
+          .order('name', { ascending: true }),
+        supabase.from('tasks').select('id, project_id, status, completed_at, created_at').eq('organization_id', currentOrganizationId),
         supabase.from('task_assignees').select('task_id, assignee_id'),
-        supabase.from('profiles').select('id, full_name, avatar_url'),
+        supabase.from('profiles').select('id, full_name, avatar_url').eq('organization_id', currentOrganizationId),
       ])
       if (cancelled) return
 
-      const nextProjects = projectsResult.error ? [] : ((projectsResult.data as ProjectRow[] | null) ?? [])
-      const nextTasks = tasksResult.error ? [] : ((tasksResult.data as TaskRow[] | null) ?? [])
-      const nextTaskAssignees = assigneesResult.error ? [] : (assigneesResult.data ?? [])
-      const nextProfiles = profilesResult.error ? [] : ((profilesResult.data as ProjectMember[] | null) ?? [])
+      const nextProjects = projectsResult.error ? cachedProjects?.projects ?? [] : ((projectsResult.data as ProjectRow[] | null) ?? [])
+      const nextTasks = tasksResult.error ? cachedProjects?.tasks ?? [] : ((tasksResult.data as TaskRow[] | null) ?? [])
+      const nextTaskAssignees = assigneesResult.error ? cachedProjects?.taskAssignees ?? [] : (assigneesResult.data ?? [])
+      const nextProfiles = profilesResult.error ? cachedProjects?.profiles ?? [] : ((profilesResult.data as ProjectMember[] | null) ?? [])
 
       setProjects(nextProjects)
       setTasks(nextTasks)
       setTaskAssignees(nextTaskAssignees)
       setProfiles(nextProfiles)
-      writeProjectsCache({
+      writeProjectsCache(currentOrganizationId, {
         projects: nextProjects,
         tasks: nextTasks,
         taskAssignees: nextTaskAssignees,
@@ -324,7 +341,7 @@ export function ProjectsPage() {
       window.removeEventListener('cloudnine:realtime-change', onRealtimeChange as EventListener)
       window.removeEventListener('cloudnine:project-created', onProjectCreated as EventListener)
     }
-  }, [])
+  }, [currentOrganizationId])
 
   const projectCards = useMemo(() => {
     const profilesById = new Map(profiles.map((profile) => [profile.id, profile]))
@@ -487,6 +504,7 @@ export function ProjectsPage() {
       .from('projects')
       .update(payload)
       .eq('id', editProjectId)
+      .eq('organization_id', currentOrganizationId)
       .select('id, name, key, color, status, description, owner_id, start_date, end_date')
       .limit(1)
     const updatedProject = data?.[0] as ProjectRow | undefined

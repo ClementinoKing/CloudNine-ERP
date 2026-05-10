@@ -51,6 +51,15 @@ type EmailAvailabilityState = {
   message: string
 }
 
+type DepartmentCreateTarget =
+  | {
+      type: 'invite-draft'
+      draftId: string
+    }
+  | {
+      type: 'job-modal'
+    }
+
 function createLocalId() {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -77,16 +86,14 @@ function DepartmentPicker({
   value,
   departments,
   disabled,
-  creating,
   onChange,
-  onCreate,
+  onRequestCreate,
 }: {
   value: string
   departments: DepartmentOption[]
   disabled?: boolean
-  creating: boolean
   onChange: (departmentId: string) => void
-  onCreate: (name: string) => void
+  onRequestCreate: (initialName: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -136,14 +143,14 @@ function DepartmentPicker({
             variant='outline'
             className='w-full justify-center gap-1.5'
             onClick={() => {
-              onCreate(query.trim())
+              onRequestCreate(query.trim())
               setOpen(false)
               setQuery('')
             }}
-            disabled={creating}
+            disabled={disabled}
           >
             <CirclePlus className='h-4 w-4' />
-            {creating ? 'Adding...' : 'Add department'}
+            Add department
           </Button>
         </div>
       </PopoverContent>
@@ -156,17 +163,15 @@ function JobPicker({
   departmentId,
   jobs,
   disabled,
-  creating,
   onChange,
-  onCreate,
+  onRequestCreate,
 }: {
   value: string
   departmentId: string
   jobs: JobOption[]
   disabled?: boolean
-  creating: boolean
   onChange: (jobId: string) => void
-  onCreate: (name: string) => void
+  onRequestCreate: (initialName: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -217,14 +222,14 @@ function JobPicker({
             variant='outline'
             className='w-full justify-center gap-1.5'
             onClick={() => {
-              onCreate(query.trim())
+              onRequestCreate(query.trim())
               setOpen(false)
               setQuery('')
             }}
-            disabled={!departmentId || creating}
+            disabled={!departmentId || disabled}
           >
             <CirclePlus className='h-4 w-4' />
-            {creating ? 'Adding...' : 'Add job'}
+            Add job
           </Button>
         </div>
       </PopoverContent>
@@ -249,6 +254,13 @@ export function InvitePeopleDialog({
   const [submitting, setSubmitting] = useState(false)
   const [creatingDepartment, setCreatingDepartment] = useState(false)
   const [creatingJob, setCreatingJob] = useState(false)
+  const [createDepartmentModalOpen, setCreateDepartmentModalOpen] = useState(false)
+  const [departmentCreateTarget, setDepartmentCreateTarget] = useState<DepartmentCreateTarget | null>(null)
+  const [newDepartmentName, setNewDepartmentName] = useState('')
+  const [createJobModalOpen, setCreateJobModalOpen] = useState(false)
+  const [jobCreateDraftId, setJobCreateDraftId] = useState<string | null>(null)
+  const [newJobDepartmentId, setNewJobDepartmentId] = useState('')
+  const [newJobName, setNewJobName] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [emailAvailability, setEmailAvailability] = useState<Record<string, EmailAvailabilityState>>({})
 
@@ -431,11 +443,37 @@ export function InvitePeopleDialog({
     setSubmitting(false)
     setCreatingDepartment(false)
     setCreatingJob(false)
+    setCreateDepartmentModalOpen(false)
+    setDepartmentCreateTarget(null)
+    setNewDepartmentName('')
+    setCreateJobModalOpen(false)
+    setJobCreateDraftId(null)
+    setNewJobDepartmentId('')
+    setNewJobName('')
     setMessage(null)
     setEmailAvailability({})
   }
 
-  const handleCreateDepartment = async (draftId: string, name: string) => {
+  const openCreateDepartmentModal = (target: DepartmentCreateTarget, initialName: string) => {
+    setDepartmentCreateTarget(target)
+    setNewDepartmentName(initialName)
+    setCreateDepartmentModalOpen(true)
+    setMessage(null)
+  }
+
+  const applyCreatedDepartment = (departmentId: string) => {
+    if (!departmentCreateTarget) return
+
+    if (departmentCreateTarget.type === 'invite-draft') {
+      updateDraft(departmentCreateTarget.draftId, { departmentId, jobId: '' })
+      return
+    }
+
+    setNewJobDepartmentId(departmentId)
+  }
+
+  const handleCreateDepartment = async () => {
+    const name = newDepartmentName.trim()
     if (!name) {
       setMessage('Enter a department name first.')
       return
@@ -443,7 +481,10 @@ export function InvitePeopleDialog({
 
     const existing = departments.find((department) => department.name.toLowerCase() === name.toLowerCase())
     if (existing) {
-      updateDraft(draftId, { departmentId: existing.id, jobId: '' })
+      applyCreatedDepartment(existing.id)
+      setCreateDepartmentModalOpen(false)
+      setDepartmentCreateTarget(null)
+      setNewDepartmentName('')
       return
     }
 
@@ -468,25 +509,49 @@ export function InvitePeopleDialog({
 
     const nextDepartment = { id: data.id, name: data.name ?? name }
     setDepartments((current) => [...current, nextDepartment].sort((left, right) => left.name.localeCompare(right.name)))
-    updateDraft(draftId, { departmentId: nextDepartment.id, jobId: '' })
+    applyCreatedDepartment(nextDepartment.id)
+    setCreateDepartmentModalOpen(false)
+    setDepartmentCreateTarget(null)
+    setNewDepartmentName('')
     window.dispatchEvent(new CustomEvent('cloudnine:realtime-change', { detail: { table: 'departments' } }))
   }
 
-  const handleCreateJob = async (draftId: string, name: string) => {
+  const openCreateJobModal = (draftId: string, initialName: string) => {
     const draft = drafts.find((item) => item.id === draftId)
     if (!draft?.departmentId) {
       setMessage('Select a department before adding a job.')
       return
     }
+
+    setJobCreateDraftId(draftId)
+    setNewJobDepartmentId(draft.departmentId)
+    setNewJobName(initialName)
+    setCreateJobModalOpen(true)
+    setMessage(null)
+  }
+
+  const handleCreateJob = async () => {
+    const name = newJobName.trim()
+    if (!newJobDepartmentId) {
+      setMessage('Select a department before adding a job.')
+      return
+    }
+
     if (!name) {
       setMessage('Enter a job title first.')
       return
     }
 
-    const departmentJobs = jobs.filter((job) => job.department_id === draft.departmentId)
+    const departmentJobs = jobs.filter((job) => job.department_id === newJobDepartmentId)
     const existing = departmentJobs.find((job) => job.name.toLowerCase() === name.toLowerCase())
     if (existing) {
-      updateDraft(draftId, { jobId: existing.id })
+      if (jobCreateDraftId) {
+        updateDraft(jobCreateDraftId, { departmentId: newJobDepartmentId, jobId: existing.id })
+      }
+      setCreateJobModalOpen(false)
+      setJobCreateDraftId(null)
+      setNewJobDepartmentId('')
+      setNewJobName('')
       return
     }
 
@@ -496,7 +561,7 @@ export function InvitePeopleDialog({
       .from('jobs')
       .insert({
         organization_id: currentOrganization.id,
-        department_id: draft.departmentId,
+        department_id: newJobDepartmentId,
         name,
         created_by: currentUser?.id ?? null,
         is_active: true,
@@ -512,7 +577,13 @@ export function InvitePeopleDialog({
 
     const nextJob = { id: data.id, department_id: data.department_id, name: data.name ?? name }
     setJobs((current) => [...current, nextJob].sort((left, right) => left.name.localeCompare(right.name)))
-    updateDraft(draftId, { jobId: nextJob.id })
+    if (jobCreateDraftId) {
+      updateDraft(jobCreateDraftId, { departmentId: nextJob.department_id, jobId: nextJob.id })
+    }
+    setCreateJobModalOpen(false)
+    setJobCreateDraftId(null)
+    setNewJobDepartmentId('')
+    setNewJobName('')
     window.dispatchEvent(new CustomEvent('cloudnine:realtime-change', { detail: { table: 'jobs' } }))
   }
 
@@ -598,6 +669,7 @@ export function InvitePeopleDialog({
   }
 
   return (
+    <>
     <Dialog
       open={open}
       onOpenChange={(nextOpen) => {
@@ -688,10 +760,9 @@ export function InvitePeopleDialog({
                     <DepartmentPicker
                       value={draft.departmentId}
                       departments={departments}
-                      creating={creatingDepartment}
                       disabled={submitting}
                       onChange={(departmentId) => updateDraft(draft.id, { departmentId, jobId: '' })}
-                      onCreate={(name) => void handleCreateDepartment(draft.id, name)}
+                      onRequestCreate={(name) => openCreateDepartmentModal({ type: 'invite-draft', draftId: draft.id }, name)}
                     />
                   </div>
 
@@ -701,10 +772,9 @@ export function InvitePeopleDialog({
                       value={draft.jobId}
                       departmentId={draft.departmentId}
                       jobs={jobs}
-                      creating={creatingJob}
                       disabled={submitting}
                       onChange={(jobId) => updateDraft(draft.id, { jobId })}
-                      onCreate={(name) => void handleCreateJob(draft.id, name)}
+                      onRequestCreate={(name) => openCreateJobModal(draft.id, name)}
                     />
                   </div>
 
@@ -805,5 +875,107 @@ export function InvitePeopleDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <Dialog
+      open={createDepartmentModalOpen}
+      onOpenChange={(nextOpen) => {
+        if (creatingDepartment) return
+        setCreateDepartmentModalOpen(nextOpen)
+        if (!nextOpen) {
+          setDepartmentCreateTarget(null)
+          setNewDepartmentName('')
+        }
+      }}
+    >
+      <DialogContent className='max-w-md'>
+        <DialogHeader>
+          <DialogTitle>Create department</DialogTitle>
+          <DialogDescription>Add a department for this organization.</DialogDescription>
+        </DialogHeader>
+        <div className='space-y-2 pb-5'>
+          <label className='text-sm font-medium'>Department name</label>
+          <Input
+            value={newDepartmentName}
+            onChange={(event) => setNewDepartmentName(event.target.value)}
+            placeholder='e.g. Finance'
+            disabled={creatingDepartment}
+          />
+        </div>
+        <DialogFooter>
+          <Button
+            variant='outline'
+            onClick={() => {
+              setCreateDepartmentModalOpen(false)
+              setDepartmentCreateTarget(null)
+              setNewDepartmentName('')
+            }}
+            disabled={creatingDepartment}
+          >
+            Cancel
+          </Button>
+          <Button onClick={() => void handleCreateDepartment()} disabled={creatingDepartment || !newDepartmentName.trim()}>
+            {creatingDepartment ? 'Creating...' : 'Create'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog
+      open={createJobModalOpen}
+      onOpenChange={(nextOpen) => {
+        if (creatingJob) return
+        setCreateJobModalOpen(nextOpen)
+        if (!nextOpen) {
+          setJobCreateDraftId(null)
+          setNewJobDepartmentId('')
+          setNewJobName('')
+        }
+      }}
+    >
+      <DialogContent className='max-w-md'>
+        <DialogHeader>
+          <DialogTitle>Create job</DialogTitle>
+          <DialogDescription>Add a job title linked to a department.</DialogDescription>
+        </DialogHeader>
+        <div className='space-y-3 pb-5'>
+          <div className='space-y-2'>
+            <label className='text-sm font-medium'>Department</label>
+            <DepartmentPicker
+              value={newJobDepartmentId}
+              departments={departments}
+              disabled={creatingJob}
+              onChange={setNewJobDepartmentId}
+              onRequestCreate={(name) => openCreateDepartmentModal({ type: 'job-modal' }, name)}
+            />
+          </div>
+          <div className='space-y-2'>
+            <label className='text-sm font-medium'>Job name</label>
+            <Input
+              value={newJobName}
+              onChange={(event) => setNewJobName(event.target.value)}
+              placeholder='e.g. Finance Manager'
+              disabled={creatingJob}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button
+            variant='outline'
+            onClick={() => {
+              setCreateJobModalOpen(false)
+              setJobCreateDraftId(null)
+              setNewJobDepartmentId('')
+              setNewJobName('')
+            }}
+            disabled={creatingJob}
+          >
+            Cancel
+          </Button>
+          <Button onClick={() => void handleCreateJob()} disabled={creatingJob || !newJobName.trim() || !newJobDepartmentId}>
+            {creatingJob ? 'Creating...' : 'Create'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }

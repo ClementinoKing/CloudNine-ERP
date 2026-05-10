@@ -42,6 +42,8 @@ import { Input } from '@/components/ui/input'
 import { MentionRichTextEditor } from '@/components/ui/mention-rich-text-editor'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useAuth } from '@/features/auth/context/auth-context'
+import { ProjectPickerPopover } from '@/features/projects/components/project-picker-popover'
+import { normalizeProjectColor } from '@/features/projects/lib/project-colors'
 import { dispatchNotificationEmails } from '@/features/notifications/lib/email-delivery'
 import { CreateTaskDialog, type CreatedTaskPayload } from '@/features/tasks/components/create-task-dialog'
 import { openTaskDetailsModal } from '@/features/tasks/lib/open-task-details-modal'
@@ -81,7 +83,7 @@ type MyTasksCachePayload = {
   userId: string
   taskRows: TaskRow[]
   commentsByTaskId: Record<string, BoardComment[]>
-  projects: Array<{ id: string; name: string }>
+  projects: Array<{ id: string; name: string; color: string | null }>
   members: Array<{ id: string; name: string; username?: string; avatarUrl?: string }>
   boardDefinitions: BoardDefinition[]
 }
@@ -555,21 +557,6 @@ function formatRange(task: TaskRow) {
   const end = parseDate(task.endDate)
   const formatter = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' })
   return `${formatter.format(start)} - ${formatter.format(end)}`
-}
-
-function calendarBarTone(status: TaskRow['status']) {
-  switch (status) {
-    case 'In Progress':
-      return 'bg-blue-500/80'
-    case 'Review':
-      return 'bg-emerald-500/80'
-    case 'Planned':
-      return 'bg-amber-500/80'
-    case 'Blocked':
-      return 'bg-rose-500/80'
-    default:
-      return 'bg-slate-500/80'
-  }
 }
 
 function statusBadgeTone(status: TaskRow['status']) {
@@ -1109,7 +1096,7 @@ export function MyTasksPage() {
   const [backgroundSyncState, setBackgroundSyncState] = useState<'idle' | 'syncing' | 'saved' | 'error'>('idle')
   const [taskRows, setTaskRows] = useState<TaskRow[]>([])
   const [commentsByTaskId, setCommentsByTaskId] = useState<Record<string, BoardComment[]>>({})
-  const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([])
+  const [projects, setProjects] = useState<Array<{ id: string; name: string; color: string | null }>>([])
   const [members, setMembers] = useState<Array<{ id: string; name: string; username?: string; email?: string; avatarUrl?: string }>>([])
   const [taskDialogOpen, setTaskDialogOpen] = useState(false)
   const [createTaskColumnId, setCreateTaskColumnId] = useState('planned')
@@ -1315,7 +1302,7 @@ export function MyTasksPage() {
 
       setTaskRows(dedupeTaskRowsById(parsed.taskRows ?? []))
       setCommentsByTaskId(parsed.commentsByTaskId ?? {})
-      setProjects(parsed.projects ?? [])
+      setProjects((parsed.projects ?? []).map((project) => ({ ...project, color: project.color ?? null })))
       setMembers(parsed.members ?? [])
       setBoardDefinitions(
         parsed.boardDefinitions?.length
@@ -1387,7 +1374,7 @@ export function MyTasksPage() {
         .select('id, task_id, author_id, content, created_at, parent_comment_id')
         .order('created_at', { ascending: false }),
       supabase.from('task_comment_reactions').select('comment_id, user_id, reaction'),
-      supabase.from('projects').select('id, name').order('name', { ascending: true }),
+      supabase.from('projects').select('id, name, color').order('name', { ascending: true }),
       profilesPromise,
     ]).then(
       ([
@@ -1401,7 +1388,11 @@ export function MyTasksPage() {
       ]) => {
       if (cancelled) return
 
-      const projects = (projectsResult.data ?? []).map((project) => ({ id: project.id, name: project.name ?? 'Untitled project' }))
+      const projects = (projectsResult.data ?? []).map((project) => ({
+        id: project.id,
+        name: project.name ?? 'Untitled project',
+        color: project.color ?? null,
+      }))
       if (!useCachedProfiles && !profilesResult.error && profilesResult.data) {
         profileRowsCacheRef.current = profilesResult.data
       }
@@ -1708,6 +1699,21 @@ export function MyTasksPage() {
   const totalTasksCount = useMemo(
     () => boardColumns.reduce((count, column) => count + column.items.length, 0),
     [boardColumns],
+  )
+  const projectColorById = useMemo(
+    () => new Map(projects.map((project) => [project.id, normalizeProjectColor(project.color)])),
+    [projects],
+  )
+  const getTaskProjectColor = useCallback(
+    (task: { projectId?: string | null }) => (task.projectId ? projectColorById.get(task.projectId) ?? null : null),
+    [projectColorById],
+  )
+  const getTaskProjectBackground = useCallback(
+    (task: { projectId?: string | null }) => {
+      const color = getTaskProjectColor(task)
+      return color ? { backgroundColor: color } : undefined
+    },
+    [getTaskProjectColor],
   )
 
   const boardSavedViews = useMemo<Array<{ key: BoardSavedView; label: string }>>(
@@ -3427,19 +3433,25 @@ export function MyTasksPage() {
               <p className='text-sm text-muted-foreground'>No tasks scheduled for this day.</p>
             ) : (
               dailyTasks.map((task) => (
-                <article key={task.id} className='rounded-md border bg-muted/15 p-3'>
+                <article
+                  key={task.id}
+                  className='rounded-md border p-3 text-white shadow-sm'
+                  style={getTaskProjectBackground(task)}
+                >
                   <div className='flex items-center justify-between gap-2'>
                     <button
                       type='button'
                       onClick={() => openTaskDetailsById(task.id)}
-                      className='font-medium text-foreground hover:underline'
+                      className='font-medium hover:underline'
                     >
                       {task.title}
                     </button>
-                    <Badge variant='outline' className={statusBadgeTone(task.status)}>{task.status}</Badge>
+                    <Badge variant='outline' className='border-white/20 bg-white/10 text-white'>
+                      {task.status}
+                    </Badge>
                   </div>
-                  <div className='mt-1 flex items-center gap-2 text-xs text-muted-foreground'>
-                    <Link to={`/dashboard/projects/${task.projectId}`} className='font-medium text-primary hover:underline'>
+                  <div className='mt-1 flex items-center gap-2 text-xs text-white/85'>
+                    <Link to={`/dashboard/projects/${task.projectId}`} className='font-medium text-white hover:underline'>
                       {task.projectName}
                     </Link>
                     <span>•</span>
@@ -3506,13 +3518,14 @@ export function MyTasksPage() {
                         <button
                           type='button'
                           onClick={() => openTaskDetailsById(task.id)}
-                          className={cn('absolute top-1 h-5 rounded px-2 text-[11px] font-medium text-white', calendarBarTone(task.status))}
+                          className='absolute top-1 h-5 rounded px-2 text-[11px] font-medium text-white shadow-sm'
                           style={{
                             left: `${(startOffset / 7) * 100}%`,
                             width: `${(spanDays / 7) * 100}%`,
+                            backgroundColor: getTaskProjectColor(task) ?? undefined,
                           }}
                         >
-                          <div className='truncate leading-5'>{task.title}</div>
+                          <span className='block truncate leading-5'>{task.title}</span>
                         </button>
                         <TaskHoverCard task={task} align={hoverAlign} onOpenTask={openTaskDetailsById} />
                       </div>
@@ -3568,7 +3581,8 @@ export function MyTasksPage() {
                           <button
                             type='button'
                             onClick={() => openTaskDetailsById(task.id)}
-                            className={cn('block w-full rounded px-1.5 py-0.5 text-left text-[10px] font-medium text-white', calendarBarTone(task.status))}
+                            className='flex w-full items-center gap-1 rounded px-1.5 py-0.5 text-left text-[10px] font-medium text-white shadow-sm'
+                            style={{ backgroundColor: getTaskProjectColor(task) ?? undefined }}
                           >
                             <span className='block truncate whitespace-nowrap'>{task.title}</span>
                           </button>
@@ -3917,24 +3931,22 @@ export function MyTasksPage() {
                                     />
                                   </div>
                                   <div className='grid grid-cols-2 gap-2'>
-                                    <select
-                                      value={editingTaskDraft.projectId}
-                                      onClick={(event) => event.stopPropagation()}
-                                      onChange={(event) =>
-                                        setEditingTaskDraft((draft) => ({
-                                          ...draft,
-                                          projectId: event.target.value,
-                                        }))
-                                      }
-                                      className='h-8 rounded-md border bg-background px-2 text-xs text-foreground'
-                                    >
-                                      <option value=''>Unassigned project</option>
-                                      {projects.map((project) => (
-                                        <option key={project.id} value={project.id}>
-                                          {project.name}
-                                        </option>
-                                      ))}
-                                    </select>
+                                    <div onClick={(event) => event.stopPropagation()}>
+                                      <ProjectPickerPopover
+                                        value={editingTaskDraft.projectId}
+                                        projects={projects}
+                                        onChange={(projectId) =>
+                                          setEditingTaskDraft((draft) => ({
+                                            ...draft,
+                                            projectId,
+                                          }))
+                                        }
+                                        ariaLabel='Project'
+                                        emptyLabel='Unassigned project'
+                                        className='h-8 px-2 text-xs'
+                                        contentClassName='w-[280px]'
+                                      />
+                                    </div>
                                     <select
                                       value={editingTaskDraft.status}
                                       onClick={(event) => event.stopPropagation()}
@@ -4192,19 +4204,16 @@ export function MyTasksPage() {
                     <option value='open'>Open</option>
                     <option value='completed'>Completed</option>
                   </select>
-                  <select
-                    value={listProjectFilter}
-                    onChange={(event) => setListProjectFilter(event.target.value)}
-                    className='h-10 rounded-md border bg-background px-3 text-sm'
-                    aria-label='Filter tasks by project'
-                  >
-                    <option value='all'>All projects</option>
-                    {projects.map((project) => (
-                      <option key={project.id} value={project.id}>
-                        {project.name}
-                      </option>
-                    ))}
-                  </select>
+                  <ProjectPickerPopover
+                    value={listProjectFilter === 'all' ? '' : listProjectFilter}
+                    projects={projects}
+                    onChange={(projectId) => setListProjectFilter(projectId || 'all')}
+                    ariaLabel='Filter tasks by project'
+                    emptyLabel='All projects'
+                    searchPlaceholder='Search projects'
+                    className='h-10 px-3 text-sm'
+                    contentClassName='w-[300px]'
+                  />
                 </div>
                 </div>
                 <Button type='button' onClick={() => setTaskDialogOpen(true)} className='h-10 shrink-0 gap-2 self-end px-3 xl:self-auto'>
@@ -4603,23 +4612,20 @@ export function MyTasksPage() {
                     </div>
                     <div className='space-y-1.5'>
                       <p className='text-xs font-semibold uppercase tracking-wide text-muted-foreground'>Project</p>
-                      <select
+                      <ProjectPickerPopover
                         value={detailDraft.projectId}
-                        disabled={!canEditActiveTask}
-                        onChange={(event) => {
-                          const nextDraft = { ...detailDraft, projectId: event.target.value }
+                        projects={projects}
+                        onChange={(projectId) => {
+                          const nextDraft = { ...detailDraft, projectId }
                           setDetailDraft(nextDraft)
                           triggerDetailAutosaveWithDraft(nextDraft)
                         }}
-                        className='h-9 w-full rounded-md border bg-background px-2 text-sm text-foreground'
-                      >
-                        <option value=''>Unassigned project</option>
-                        {projects.map((project) => (
-                          <option key={project.id} value={project.id}>
-                            {project.name}
-                          </option>
-                        ))}
-                      </select>
+                        disabled={!canEditActiveTask}
+                        ariaLabel='Project'
+                        emptyLabel='Unassigned project'
+                        className='h-9 px-2 text-sm'
+                        contentClassName='w-[300px]'
+                      />
                     </div>
                     <div className='space-y-1.5'>
                       <p className='text-xs font-semibold uppercase tracking-wide text-muted-foreground'>Status</p>

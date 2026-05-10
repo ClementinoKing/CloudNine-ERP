@@ -10,11 +10,10 @@ import { Input } from '@/components/ui/input'
 import { MentionRichTextEditor, type MentionRichTextEditorHandle } from '@/components/ui/mention-rich-text-editor'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useAuth } from '@/features/auth/context/auth-context'
-import { dispatchNotificationEmails } from '@/features/notifications/lib/email-delivery'
+import { ProjectPickerPopover, type ProjectOption } from '@/features/projects/components/project-picker-popover'
 import { useOrganization } from '@/features/organization/context/organization-context'
 import {
   FALLBACK_STATUS_OPTIONS,
-  legacyBoardColumnForStatusKey,
   mapStatusRowsToOptions,
   resolveProjectStatusOptions,
   type StatusOption,
@@ -22,7 +21,6 @@ import {
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 
-type ProjectOption = { id: string; name: string }
 type MemberOption = { id: string; name: string; username?: string; email?: string; avatarUrl?: string }
 type TaskOption = { id: string; title: string }
 type TaskType = 'task' | 'subtask'
@@ -177,14 +175,18 @@ export function CreateTaskDialog({
     let cancelled = false
 
     void Promise.all([
-      supabase.from('projects').select('id, name').order('name', { ascending: true }),
+      supabase.from('projects').select('id, name, color').order('name', { ascending: true }),
       supabase.from('profiles').select('id, full_name, username, email, avatar_url').order('full_name', { ascending: true }),
       supabase.from('tasks').select('id, title').order('created_at', { ascending: false }).limit(300),
       supabase.from('status').select('id, project_id, key, label, sort_order, is_default').order('sort_order', { ascending: true }),
     ]).then(([projectsResult, profilesResult, tasksResult, statusesResult]) => {
       if (cancelled) return
 
-      const projects = (projectsResult.data ?? []).map((project) => ({ id: project.id, name: project.name ?? 'Untitled project' }))
+      const projects = (projectsResult.data ?? []).map((project) => ({
+        id: project.id,
+        name: project.name ?? 'Untitled project',
+        color: project.color ?? null,
+      }))
       const members = (profilesResult.data ?? []).map((profile) => ({
         id: profile.id,
         name: profile.full_name ?? profile.email ?? 'Unknown member',
@@ -357,7 +359,6 @@ export function CreateTaskDialog({
       const effectiveAssigneeIds = assigneeIds.length > 0 ? assigneeIds : currentUser?.id ? [currentUser.id] : []
       const primaryAssigneeId = effectiveAssigneeIds[0] ?? null
       const selectedStatus = availableStatuses.find((status) => status.id === selectedStatusId) ?? availableStatuses[0] ?? FALLBACK_STATUS_OPTIONS[0]
-      const legacyBoardColumn = legacyBoardColumnForStatusKey(selectedStatus?.key)
       const { data, error } = await supabase.rpc('create_task_with_recurrence', {
         p_organization_id: currentOrganizationId,
         p_title: trimmedTitle,
@@ -365,7 +366,7 @@ export function CreateTaskDialog({
         p_description: description.trim() || null,
         p_status_id: isPersistedStatusId(selectedStatus?.id) ? selectedStatus.id : null,
         p_status: selectedStatus?.key ?? 'planned',
-        p_board_column: legacyBoardColumn,
+        p_board_column: null,
         p_project_id: projectId || null,
         p_assignee_ids: effectiveAssigneeIds,
         p_due_at: dueAtIso,
@@ -380,29 +381,17 @@ export function CreateTaskDialog({
         throw error ?? new Error('Task could not be created.')
       }
 
-      if (currentUser?.id) {
-        const { data: notificationRows, error: notificationError } = await supabase
-          .from('notifications')
-          .select('id, recipient_id, metadata')
-          .eq('task_id', data.id)
-          .eq('actor_id', currentUser.id)
-          .order('created_at', { ascending: true })
+      const { error: notificationDispatchError } = await supabase.functions.invoke('notify-teammates', {
+        body: {
+          taskId: data.id,
+          taskTitle: data.title,
+          actorName: currentUser?.name ?? currentUser?.email ?? 'A teammate',
+          contextKind: 'task',
+        },
+      })
 
-        if (notificationError) {
-          console.error('Failed to load task notifications', notificationError)
-        } else if (notificationRows?.length) {
-          void dispatchNotificationEmails(
-            notificationRows.map((item) => ({
-              notificationId: item.id,
-              recipientId: item.recipient_id,
-              recipientEmail: memberOptions.find((member) => member.id === item.recipient_id)?.email,
-              type: item.metadata?.event === 'task_mentioned' ? ('mention' as const) : ('task_assigned' as const),
-              taskId: data.id,
-              taskTitle: data.title,
-              actorName: currentUser.name ?? currentUser.email ?? 'A teammate',
-            })),
-          )
-        }
+      if (notificationDispatchError) {
+        console.error('Failed to invoke task notification email function', notificationDispatchError)
       }
 
       const selectedAssigneeNames = effectiveAssigneeIds
@@ -475,17 +464,7 @@ export function CreateTaskDialog({
   ])
 
   const assigneeOptions = useMemo(() => {
-    const options = memberOptions.slice()
-    if (currentUser && !options.some((member) => member.id === currentUser.id)) {
-      options.unshift({
-        id: currentUser.id,
-        name: currentUser.name ?? currentUser.email ?? 'Me',
-        username: currentUser.username ?? undefined,
-        email: currentUser.email ?? undefined,
-        avatarUrl: currentUser.avatarUrl ?? undefined,
-      })
-    }
-    return options
+    return memberOptions.filter((member) => member.id !== currentUser?.id)
   }, [currentUser, memberOptions])
   const mentionOptions = useMemo(
     () => memberOptions.filter((member) => member.id !== currentUser?.id),
@@ -688,20 +667,15 @@ export function CreateTaskDialog({
 
           <div className='grid gap-3 md:grid-cols-3'>
             <div className='space-y-2'>
-              <select
+              <ProjectPickerPopover
                 value={projectId}
-                onChange={(event) => setProjectId(event.target.value)}
+                projects={projectOptions}
+                onChange={setProjectId}
                 disabled={lockProjectSelection}
-                className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
-                aria-label='Project'
-              >
-                <option value=''>No project</option>
-                {projectOptions.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
+                ariaLabel='Project'
+                emptyLabel='No project'
+                searchPlaceholder='Search projects'
+              />
               {lockProjectSelection ? <p className='text-[11px] text-muted-foreground'>Project is inherited from the parent task.</p> : null}
             </div>
             <div className='space-y-2'>

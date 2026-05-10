@@ -46,6 +46,7 @@ import { adjustCachedUnreadCount } from '@/features/layout/lib/unread-notificati
 import { Input } from '@/components/ui/input'
 import { CreateTaskDialog } from '@/features/tasks/components/create-task-dialog'
 import { openTaskDetailsModal } from '@/features/tasks/lib/open-task-details-modal'
+import { useOrganization } from '@/features/organization/context/organization-context'
 import { DEFAULT_PROJECT_COLOR, PROJECT_COLOR_OPTIONS, normalizeProjectColor, projectDotStyle } from '@/features/projects/lib/project-colors'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
@@ -132,13 +133,13 @@ const HEADER_SEARCH_CACHE_TTL_MS = 5 * 60 * 1000
 const HEADER_SEARCH_RELOAD_DEBOUNCE_MS = 250
 const HEADER_SEARCH_CACHE_KEY = 'cloudnine.header-search.cache.v1'
 
-function getHeaderSearchCacheKey(userId: string) {
-  return `${HEADER_SEARCH_CACHE_KEY}:${userId}`
+function getHeaderSearchCacheKey(userId: string, organizationId: string) {
+  return `${HEADER_SEARCH_CACHE_KEY}:${userId}:${organizationId}`
 }
 
-function readHeaderSearchCache(userId: string): { cachedAt: number; data: HeaderSearchData } | null {
+function readHeaderSearchCache(userId: string, organizationId: string): { cachedAt: number; data: HeaderSearchData } | null {
   try {
-    const raw = localStorage.getItem(getHeaderSearchCacheKey(userId))
+    const raw = localStorage.getItem(getHeaderSearchCacheKey(userId, organizationId))
     if (!raw) return null
     const parsed = JSON.parse(raw) as { cachedAt?: number; data?: HeaderSearchData }
     if (!parsed?.cachedAt || !parsed.data) return null
@@ -149,9 +150,9 @@ function readHeaderSearchCache(userId: string): { cachedAt: number; data: Header
   }
 }
 
-function writeHeaderSearchCache(userId: string, data: HeaderSearchData) {
+function writeHeaderSearchCache(userId: string, organizationId: string, data: HeaderSearchData) {
   try {
-    localStorage.setItem(getHeaderSearchCacheKey(userId), JSON.stringify({ cachedAt: Date.now(), data }))
+    localStorage.setItem(getHeaderSearchCacheKey(userId, organizationId), JSON.stringify({ cachedAt: Date.now(), data }))
   } catch {
     // Ignore storage failures.
   }
@@ -311,6 +312,7 @@ export function AppHeader({
 }) {
   const navigate = useNavigate()
   const { currentUser } = useAuth()
+  const { currentOrganizationId } = useOrganization()
   const { unreadCount } = useUnreadNotifications()
 
   const [createTaskOpen, setCreateTaskOpen] = useState(false)
@@ -389,7 +391,7 @@ export function AppHeader({
         return
       }
 
-      const cached = background ? null : readHeaderSearchCache(currentUser.id)
+      const cached = background ? null : readHeaderSearchCache(currentUser.id, currentOrganizationId)
       if (cached) {
         setSearchData(cached.data)
         setSearchLoading(false)
@@ -398,11 +400,29 @@ export function AppHeader({
       }
 
       const [projectsResult, tasksResult, taskAssigneesResult, profilesResult, goalsResult] = await Promise.all([
-        supabase.from('projects').select('id, name, key, description, status, owner_id').order('name', { ascending: true }),
-        supabase.from('tasks').select('id, title, status, due_at, project_id, assigned_to, created_at').order('created_at', { ascending: false }).limit(250),
+        supabase
+          .from('projects')
+          .select('id, name, key, description, status, owner_id')
+          .eq('organization_id', currentOrganizationId)
+          .order('name', { ascending: true }),
+        supabase
+          .from('tasks')
+          .select('id, title, status, due_at, project_id, assigned_to, created_at')
+          .eq('organization_id', currentOrganizationId)
+          .order('created_at', { ascending: false })
+          .limit(250),
         supabase.from('task_assignees').select('task_id, assignee_id'),
-        supabase.from('profiles').select('id, full_name, username, email, avatar_url, role_label, job_title, department').order('full_name', { ascending: true }),
-        supabase.from('goals').select('id, title, owner_id, cycle, status, health, department, due_at').order('created_at', { ascending: false }).limit(200),
+        supabase
+          .from('profiles')
+          .select('id, full_name, username, email, avatar_url, role_label, job_title, department')
+          .eq('organization_id', currentOrganizationId)
+          .order('full_name', { ascending: true }),
+        supabase
+          .from('goals')
+          .select('id, title, owner_id, cycle, status, health, department, due_at')
+          .eq('organization_id', currentOrganizationId)
+          .order('created_at', { ascending: false })
+          .limit(200),
       ])
 
       const projectRows = (projectsResult.data ?? []) as Array<{
@@ -494,10 +514,10 @@ export function AppHeader({
       }
 
       setSearchData(searchDataPayload)
-      writeHeaderSearchCache(currentUser.id, searchDataPayload)
+      writeHeaderSearchCache(currentUser.id, currentOrganizationId, searchDataPayload)
       setSearchLoading(false)
     },
-    [currentUser?.id],
+    [currentOrganizationId, currentUser?.id],
   )
 
   const resetProjectFlow = () => {
@@ -507,6 +527,7 @@ export function AppHeader({
     setProjectStartDate(undefined)
     setProjectEndDate(undefined)
     setProjectDescription('')
+    setProjectOwners([])
     setProjectSubmitError(null)
     setProjectSubmitting(false)
   }
@@ -517,6 +538,10 @@ export function AppHeader({
     setCreateProjectOpen(true)
   }, [currentUser?.id])
 
+  useEffect(() => {
+    resetProjectFlow()
+  }, [currentOrganizationId])
+
   const handleProjectModalChange = (open: boolean) => {
     if (!open) {
       resetProjectFlow()
@@ -526,12 +551,14 @@ export function AppHeader({
 
   useEffect(() => {
     if (!createProjectOpen || projectOwners.length > 0) return
+    if (!currentOrganizationId) return
 
     let cancelled = false
 
     void supabase
       .from('profiles')
       .select('id, full_name, email')
+      .eq('organization_id', currentOrganizationId)
       .order('full_name', { ascending: true })
       .then((result) => {
         if (cancelled || result.error) return
@@ -548,7 +575,7 @@ export function AppHeader({
     return () => {
       cancelled = true
     }
-  }, [createProjectOpen, currentUser?.id, projectOwner, projectOwners.length])
+  }, [createProjectOpen, currentOrganizationId, currentUser?.id, projectOwner, projectOwners.length])
 
   useEffect(() => {
     if (!currentUser?.id) return
@@ -562,7 +589,7 @@ export function AppHeader({
     if (!currentUser?.id) return
 
     const timer = window.setTimeout(() => {
-      const cached = readHeaderSearchCache(currentUser.id)
+      const cached = readHeaderSearchCache(currentUser.id, currentOrganizationId)
       if (cached) {
         setSearchData(cached.data)
         setSearchLoading(false)
@@ -572,7 +599,7 @@ export function AppHeader({
     }, 0)
 
     return () => window.clearTimeout(timer)
-  }, [currentUser?.id, loadSearchData])
+  }, [currentOrganizationId, currentUser?.id, loadSearchData])
 
   useEffect(() => {
     if (!searchOpen) return
@@ -938,6 +965,7 @@ export function AppHeader({
     const { data, error } = await supabase
       .from('projects')
       .insert({
+        organization_id: currentOrganizationId,
         name: trimmedName,
         key,
         status: 'planned',

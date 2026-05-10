@@ -37,7 +37,7 @@ export type ReminderEmailInput = {
 
 export const CLOUDNINE_BRAND = {
   name: 'CloudNine ERP',
-  logoUrl: 'https://pub-a46f5051137d4371b468ede26ed2c03c.r2.dev/assest/CN_logo.svg',
+  logoUrl: 'https://pub-a46f5051137d4371b468ede26ed2c03c.r2.dev/assest/CN_Logo.png',
   colors: {
     page: '#f9fafb',
     panel: '#ffffff',

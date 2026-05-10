@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { ProjectPickerPopover } from '@/features/projects/components/project-picker-popover'
 import { useOrganization } from '@/features/organization/context/organization-context'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
@@ -70,6 +71,7 @@ type ProfileRow = {
 type ProjectRow = {
   id: string
   name: string | null
+  color: string | null
 }
 
 type KpiMetrics = {
@@ -470,7 +472,7 @@ export function ReportingPage() {
       supabase.from('goal_links').select('goal_id,project_id').eq('organization_id', currentOrganizationId),
       supabase.from('goal_checkins').select('id,goal_id,author_id,created_at,blockers,next_actions').order('created_at', { ascending: false }).limit(80),
       supabase.from('profiles').select('id,full_name,department').eq('organization_id', currentOrganizationId).order('full_name', { ascending: true }),
-      supabase.from('projects').select('id,name').eq('organization_id', currentOrganizationId).order('name', { ascending: true }),
+      supabase.from('projects').select('id,name,color').eq('organization_id', currentOrganizationId).order('name', { ascending: true }),
     ]).then(([tasksResult, goalsResult, linksResult, checkinsResult, profilesResult, projectsResult]) => {
       if (cancelled) return
       const nextTasks = (tasksResult.data as ReportingTaskRow[] | null) ?? []
@@ -601,7 +603,10 @@ export function ReportingPage() {
     return [{ id: 'all', name: 'All owners' }, ...owners]
   }, [goals, profileById, tasks])
 
-  const projectOptions = useMemo(() => [{ id: 'all', name: 'All projects' }, ...projects.map((project) => ({ id: project.id, name: project.name ?? 'Untitled project' }))], [projects])
+  const projectOptions = useMemo(
+    () => [{ id: 'all', name: 'All projects', color: null }, ...projects.map((project) => ({ id: project.id, name: project.name ?? 'Untitled project', color: project.color ?? null }))],
+    [projects],
+  )
 
   const baseFilteredTasks = useMemo(() => {
     const search = filters.search.trim().toLowerCase()
@@ -1293,17 +1298,16 @@ export function ReportingPage() {
 
             <div className='space-y-1'>
               <p className='text-[11px] uppercase tracking-[0.18em] text-muted-foreground'>Project</p>
-              <select
-                value={filters.projectId}
-                onChange={(event) => setFilters((current) => ({ ...current, projectId: event.target.value }))}
-                className='h-10 w-full rounded-md border bg-background px-3 text-sm text-foreground outline-none transition focus:border-primary'
-              >
-                {projectOptions.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
+              <ProjectPickerPopover
+                value={filters.projectId === 'all' ? '' : filters.projectId}
+                projects={projectOptions}
+                onChange={(projectId) => setFilters((current) => ({ ...current, projectId: projectId || 'all' }))}
+                ariaLabel='Project'
+                emptyLabel='All projects'
+                searchPlaceholder='Search projects'
+                className='h-10 px-3 text-sm'
+                contentClassName='w-[300px]'
+              />
             </div>
 
             <div className='space-y-1'>

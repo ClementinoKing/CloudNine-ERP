@@ -26,6 +26,7 @@ import { Input } from '@/components/ui/input'
 import { MentionRichTextEditor } from '@/components/ui/mention-rich-text-editor'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useAuth } from '@/features/auth/context/auth-context'
+import { ProjectPickerPopover } from '@/features/projects/components/project-picker-popover'
 import { dispatchNotificationEmails } from '@/features/notifications/lib/email-delivery'
 import { CreateTaskDialog, type CreatedTaskPayload } from '@/features/tasks/components/create-task-dialog'
 import { consumePendingTaskDetailsModalId, peekPendingTaskDetailsModalId } from '@/features/tasks/lib/open-task-details-modal'
@@ -69,7 +70,7 @@ type TaskRecurrenceRow = {
 }
 
 type Member = { id: string; name: string; username?: string | null; email?: string | null; avatarUrl?: string }
-type Project = { id: string; name: string }
+type Project = { id: string; name: string; color: string | null }
 type CommentRow = {
   id: string
   content: string | null
@@ -546,7 +547,7 @@ export function UniversalTaskDetailsModal() {
         .order('created_at', { ascending: false })
         .limit(80),
       supabase.from('task_comment_reactions').select('comment_id, user_id, reaction'),
-      shouldFetchProjects ? supabase.from('projects').select('id, name').order('name', { ascending: true }) : Promise.resolve({ data: null, error: null }),
+      shouldFetchProjects ? supabase.from('projects').select('id, name, color').order('name', { ascending: true }) : Promise.resolve({ data: null, error: null }),
       shouldFetchMembers
         ? supabase.from('profiles').select('id, full_name, username, email, avatar_url').order('full_name', { ascending: true })
         : Promise.resolve({ data: null, error: null }),
@@ -560,7 +561,13 @@ export function UniversalTaskDetailsModal() {
     }
     setSubtasks(subtasksResult.data ?? [])
     if (projectsResult.data) {
-      setProjects((projectsResult.data ?? []).map((project) => ({ id: project.id, name: project.name ?? 'Untitled project' })))
+      setProjects(
+        (projectsResult.data ?? []).map((project) => ({
+          id: project.id,
+          name: project.name ?? 'Untitled project',
+          color: project.color ?? null,
+        })),
+      )
     }
     if (profilesResult.data) {
       setMembers(
@@ -1267,20 +1274,21 @@ export function UniversalTaskDetailsModal() {
                 <div className='grid gap-3 md:grid-cols-2'>
                   <div>
                     <p className='mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>Project</p>
-                    <select
+                    <ProjectPickerPopover
                       value={task.project_id ?? ''}
-                      onChange={(event) => setTask((current) => (current ? { ...current, project_id: event.target.value || null } : current))}
-                      onBlur={() => task && void saveTask(task, assigneeIds)}
+                      projects={projects}
+                      onChange={(projectId) => {
+                        if (!task) return
+                        const nextTask = { ...task, project_id: projectId || null }
+                        setTask(nextTask)
+                        void saveTask(nextTask, assigneeIds)
+                      }}
                       disabled={!canEdit}
-                      className='h-10 w-full rounded-md bg-muted/40 px-3 text-sm shadow-[inset_0_0_0_1px_hsl(var(--foreground)/0.04)]'
-                    >
-                      <option value=''>Unassigned project</option>
-                      {projects.map((project) => (
-                        <option key={project.id} value={project.id}>
-                          {project.name}
-                        </option>
-                      ))}
-                    </select>
+                      ariaLabel='Project'
+                      emptyLabel='Unassigned project'
+                      className='h-10 bg-muted/40 px-3 text-sm shadow-[inset_0_0_0_1px_hsl(var(--foreground)/0.04)]'
+                      contentClassName='w-[300px]'
+                    />
                   </div>
                   <div>
                     <p className='mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>Status</p>
