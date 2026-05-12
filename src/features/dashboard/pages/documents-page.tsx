@@ -15,11 +15,14 @@ import {
   Search,
   RotateCcw,
   HardDrive,
+  Share2,
   Shield,
   FileType,
   SlidersHorizontal,
   Upload,
   Trash2,
+  FolderUp,
+  Users,
   UserRound,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
@@ -36,7 +39,17 @@ import {
 import { Input } from '@/components/ui/input'
 import { DocumentViewerModal } from '@/components/document-viewer-modal'
 import { useAuth } from '@/features/auth/context/auth-context'
+import { FolderShareDialog } from '@/features/dashboard/components/folder-share-dialog'
+import {
+  buildDriveUploadTree,
+  collectDriveUploadEntriesFromDataTransfer,
+  createDriveUploadEntriesFromFiles,
+  type DriveUploadEntry,
+  type DriveUploadTreeNode,
+} from '@/features/dashboard/lib/drive-folder-upload'
+import { replaceDriveFolderMembers, type DriveFolderMemberRow, type FolderShareMember } from '@/features/dashboard/lib/drive-folder-sharing'
 import { notify } from '@/lib/notify'
+import { useOrganization } from '@/features/organization/context/organization-context'
 import {
   getAttachmentExtension,
   getDocumentStyle,
@@ -107,6 +120,7 @@ type UserProfileSummary = {
   fullName: string | null
   username: string | null
   email: string | null
+  avatarUrl: string | null
 }
 
 type DocumentFilter = 'all' | 'images' | 'pdf' | 'docs' | 'sheets' | 'slides' | 'text'
@@ -148,7 +162,7 @@ function readStoredActiveFolderId() {
 
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
   let value = bytes
   let unitIndex = 0
   while (value >= 1024 && unitIndex < units.length - 1) {
@@ -284,6 +298,21 @@ function isSharedRootFolder(folder: DriveFolder) {
   return folder.parentId === null && folder.visibility === 'shared' && folder.name === 'Shared'
 }
 
+function folderHasSharedRootAncestor(folder: DriveFolder, folderMap: Map<string, DriveFolder>) {
+  let currentParentId = folder.parentId
+  while (currentParentId) {
+    const parent = folderMap.get(currentParentId) ?? null
+    if (!parent) return false
+    if (isSharedRootFolder(parent)) return true
+    currentParentId = parent.parentId
+  }
+  return false
+}
+
+function isSharedFolder(folder: DriveFolder, folderMap: Map<string, DriveFolder>, sharedMemberCount: number) {
+  return isSharedRootFolder(folder) || sharedMemberCount > 0 || folderHasSharedRootAncestor(folder, folderMap)
+}
+
 function sortDocuments(documents: DriveDocument[], sort: DocumentSort) {
   return [...documents].sort((left, right) => {
     switch (sort) {
@@ -361,7 +390,7 @@ function DocumentsPageSkeleton() {
                     <SkeletonBlock className='h-3 w-20' />
                   </div>
                 </div>
-                <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4'>
+                <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-3'>
                   {Array.from({ length: 3 }, (_, index) => (
                     <div key={`drive-folder-skeleton-${index}`} className='rounded-[1.6rem] border border-border/70 bg-card/80 p-4 shadow-sm'>
                       <div className='flex items-start justify-between gap-2'>
@@ -420,6 +449,7 @@ function DocumentsPageSkeleton() {
 
 export function DocumentsPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const folderInputRef = useRef<HTMLInputElement | null>(null)
   const [state, setState] = useState<DriveState>({
     folders: [],
     documents: [],
@@ -434,53 +464,70 @@ export function DocumentsPage() {
   const [filtersDrawerOpen, setFiltersDrawerOpen] = useState(false)
   const [newFolderOpen, setNewFolderOpen] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
+  const [renameFolderOpen, setRenameFolderOpen] = useState(false)
+  const [renameFolderId, setRenameFolderId] = useState<string | null>(null)
+  const [renameFolderName, setRenameFolderName] = useState('')
   const [dragging, setDragging] = useState<DragPayload | null>(null)
   const [dropTarget, setDropTarget] = useState<string | 'root' | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([])
   const [uploadTargetLabel, setUploadTargetLabel] = useState<string | null>(null)
-  const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [previewDocumentId, setPreviewDocumentId] = useState<string | null>(null)
   const [infoDocumentId, setInfoDocumentId] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [csvPreviewText, setCsvPreviewText] = useState<string | null>(null)
   const [csvPreviewLoading, setCsvPreviewLoading] = useState(false)
-  const [csvPreviewError, setCsvPreviewError] = useState<string | null>(null)
   const [cardPreviewUrls, setCardPreviewUrls] = useState<Record<string, string>>({})
   const [userProfilesById, setUserProfilesById] = useState<Record<string, UserProfileSummary>>({})
+  const [organizationMembers, setOrganizationMembers] = useState<FolderShareMember[]>([])
+  const [folderShares, setFolderShares] = useState<DriveFolderMemberRow[]>([])
+  const [shareFolderId, setShareFolderId] = useState<string | null>(null)
+  const [shareDialogOpen, setShareDialogOpen] = useState(false)
+  const [savingShareAccess, setSavingShareAccess] = useState(false)
   const { currentUser } = useAuth()
+  const { currentOrganizationId } = useOrganization()
+  const [chatAttachmentBytes, setChatAttachmentBytes] = useState(0)
+  const toastDriveError = (title: string, description: string) => {
+    notify.error(title, { description })
+  }
 
   const refreshDrive = async () => {
+    if (!currentOrganizationId) {
+      setState({
+        folders: [],
+        documents: [],
+        activeFolderId: null,
+        view: 'drive',
+      })
+      setUserProfilesById({})
+      setOrganizationMembers([])
+      setFolderShares([])
+      return false
+    }
+
     const [foldersResult, documentsResult] = await Promise.all([
       supabase.from('drive_folders').select('id,parent_id,owner_id,visibility,name,sort_order,deleted_at,created_by,created_at,updated_at').order('sort_order', { ascending: true }),
       supabase.from('drive_documents').select('id,folder_id,owner_id,visibility,storage_bucket,storage_path,file_name,mime_type,file_size_bytes,sort_order,deleted_at,uploaded_by,created_at,updated_at').order('sort_order', { ascending: true }),
     ])
 
     if (foldersResult.error) {
-      setStatusMessage(foldersResult.error.message)
+      toastDriveError('Failed to load documents', foldersResult.error.message)
       return false
     }
     if (documentsResult.error) {
-      setStatusMessage(documentsResult.error.message)
+      toastDriveError('Failed to load documents', documentsResult.error.message)
       return false
     }
 
-    const ownerIds = Array.from(
-      new Set((documentsResult.data ?? []).map((document) => document.owner_id).filter((value): value is string => Boolean(value))),
-    )
-    const uploadedByIds = Array.from(
-      new Set((documentsResult.data ?? []).map((document) => document.uploaded_by).filter((value): value is string => Boolean(value))),
-    )
-    const profileIds = Array.from(new Set([...ownerIds, ...uploadedByIds]))
+    const [profilesResult, folderMembersResult] = await Promise.all([
+      supabase.from('profiles').select('id,full_name,username,email,avatar_url').eq('organization_id', currentOrganizationId).order('full_name', { ascending: true }),
+      supabase.from('drive_folder_members').select('organization_id,folder_id,member_id,granted_by,created_at,updated_at').eq('organization_id', currentOrganizationId),
+    ])
 
-    let profileMap: Record<string, UserProfileSummary> = {}
-    if (profileIds.length > 0) {
-      const profilesResult = await supabase.from('profiles').select('id,full_name,username,email').in('id', profileIds)
-      if (profilesResult.error) {
-        setStatusMessage(profilesResult.error.message)
-      } else {
-        profileMap = Object.fromEntries(
+    const profileMap: Record<string, UserProfileSummary> = profilesResult.error
+      ? {}
+      : Object.fromEntries(
           (profilesResult.data ?? []).map((profile) => [
             profile.id,
             {
@@ -488,11 +535,10 @@ export function DocumentsPage() {
               fullName: profile.full_name ?? null,
               username: profile.username ?? null,
               email: profile.email ?? null,
+              avatarUrl: profile.avatar_url ?? null,
             },
           ]),
         )
-      }
-    }
 
     setState((current) => ({
       ...current,
@@ -526,6 +572,31 @@ export function DocumentsPage() {
       })),
     }))
     setUserProfilesById(profileMap)
+    setOrganizationMembers(
+      (profilesResult.data ?? []).map((profile) => ({
+        id: profile.id,
+        fullName: profile.full_name ?? null,
+        username: profile.username ?? null,
+        email: profile.email ?? null,
+        avatarUrl: profile.avatar_url ?? null,
+      })),
+    )
+    setFolderShares(
+      (folderMembersResult.data ?? []).map((row) => ({
+        organizationId: row.organization_id,
+        folderId: row.folder_id,
+        memberId: row.member_id,
+        grantedBy: row.granted_by,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      })),
+    )
+    if (profilesResult.error) {
+      console.error('Failed to load organization members for folder sharing', profilesResult.error)
+    }
+    if (folderMembersResult.error) {
+      console.error('Failed to load folder sharing records', folderMembersResult.error)
+    }
     return true
   }
 
@@ -537,7 +608,7 @@ export function DocumentsPage() {
         await refreshDrive()
       } catch (error) {
         if (!cancelled) {
-          setStatusMessage(error instanceof Error ? error.message : 'Failed to load documents.')
+          toastDriveError('Failed to load documents', error instanceof Error ? error.message : 'Failed to load documents.')
         }
       } finally {
         if (!cancelled) {
@@ -549,6 +620,39 @@ export function DocumentsPage() {
     return () => {
       cancelled = true
     }
+  }, [currentOrganizationId])
+
+  useEffect(() => {
+    let cancelled = false
+
+    void (async () => {
+      if (!currentOrganizationId) {
+        setChatAttachmentBytes(0)
+        return
+      }
+
+      const { data, error } = await supabase.from('chat_message_attachments').select('file_size_bytes')
+      if (cancelled) return
+
+      if (error) {
+        setChatAttachmentBytes(0)
+        return
+      }
+
+      const nextBytes = (data ?? []).reduce((sum, attachment) => sum + Number(attachment.file_size_bytes ?? 0), 0)
+      setChatAttachmentBytes(nextBytes)
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentOrganizationId])
+
+  useEffect(() => {
+    const folderInput = folderInputRef.current
+    if (!folderInput) return
+    folderInput.setAttribute('webkitdirectory', '')
+    folderInput.setAttribute('directory', '')
   }, [])
 
   const folderMap = useMemo(() => new Map(state.folders.map((folder) => [folder.id, folder])), [state.folders])
@@ -579,6 +683,28 @@ export function DocumentsPage() {
     }
     return map
   }, [driveFolders])
+  const folderSharesByFolderId = useMemo(() => {
+    const map = new Map<string, DriveFolderMemberRow[]>()
+    for (const row of folderShares) {
+      const list = map.get(row.folderId) ?? []
+      list.push(row)
+      map.set(row.folderId, list)
+    }
+    return map
+  }, [folderShares])
+  const shareableMembers = useMemo(
+    () => organizationMembers.filter((member) => member.id !== currentUser?.id),
+    [currentUser?.id, organizationMembers],
+  )
+  const shareFolder = useMemo(() => {
+    if (!shareFolderId) return null
+    return folderMap.get(shareFolderId) ?? null
+  }, [folderMap, shareFolderId])
+  const shareFolderMemberIds = useMemo(
+    () => (shareFolderId ? (folderSharesByFolderId.get(shareFolderId) ?? []).map((row) => row.memberId) : []),
+    [folderSharesByFolderId, shareFolderId],
+  )
+  const getFolderSharedMemberCount = (folderId: string) => folderSharesByFolderId.get(folderId)?.length ?? 0
 
   const isTrashView = state.view === 'trash'
   const activeFolderId = isTrashView ? null : state.activeFolderId
@@ -676,6 +802,13 @@ export function DocumentsPage() {
     () => (csvPreviewText ? parseCsvText(csvPreviewText) : []),
     [csvPreviewText],
   )
+  const storageCapacityBytes = 1024 ** 4
+  const driveStorageBytes = useMemo(
+    () => state.documents.reduce((sum, document) => sum + Math.max(0, document.size), 0),
+    [state.documents],
+  )
+  const storageUsedBytes = driveStorageBytes + chatAttachmentBytes
+  const storageUsagePercent = Math.min(100, Math.round((storageUsedBytes / storageCapacityBytes) * 100))
   const trashCount = trashedFolders.length + trashedDocuments.length
   const draggingFolder = useMemo(
     () => (dragging?.kind === 'folder' ? folderMap.get(dragging.id) ?? null : null),
@@ -808,14 +941,12 @@ export function DocumentsPage() {
     if (selectedDocumentViewerMode !== 'csv' || !previewUrl) {
       setCsvPreviewText(null)
       setCsvPreviewLoading(false)
-      setCsvPreviewError(null)
       return
     }
 
     let cancelled = false
     setCsvPreviewText(null)
     setCsvPreviewLoading(true)
-    setCsvPreviewError(null)
 
     void fetch(previewUrl)
       .then(async (response) => {
@@ -833,7 +964,7 @@ export function DocumentsPage() {
         if (cancelled) return
         setCsvPreviewText(null)
         setCsvPreviewLoading(false)
-        setCsvPreviewError(error instanceof Error ? error.message : 'CSV preview failed.')
+        toastDriveError('CSV preview failed', error instanceof Error ? error.message : 'CSV preview failed.')
       })
 
     return () => {
@@ -875,47 +1006,235 @@ export function DocumentsPage() {
     if (state.view === 'trash') return
     const name = newFolderName.trim()
     if (!name) return
-    setStatusMessage(null)
     const { error } = await supabase.rpc('create_drive_folder', {
+      p_organization_id: currentOrganizationId,
       p_name: name,
       p_parent_id: state.activeFolderId,
     })
     if (error) {
-      setStatusMessage(error.message)
+      toastDriveError('Folder creation failed', error.message)
       return
     }
     await refreshDrive()
     setNewFolderName('')
     setNewFolderOpen(false)
-    setStatusMessage(null)
     notify.success('Folder created', {
       description: `"${name}" was added to ${currentFolderLabel}.`,
     })
   }
 
-  const handleUpload = async (files: FileList | File[], targetFolderId?: string | null) => {
+  const openRenameFolder = (folderId: string) => {
+    const folder = folderMap.get(folderId)
+    if (!folder) {
+      toastDriveError('Rename unavailable', 'Folder not found.')
+      return
+    }
+
+    if (isSharedRootFolder(folder)) {
+      toastDriveError('Rename unavailable', 'The shared root folder cannot be renamed.')
+      return
+    }
+
+    setRenameFolderId(folderId)
+    setRenameFolderName(folder.name)
+    setRenameFolderOpen(true)
+  }
+
+  const openShareFolder = (folderId: string) => {
+    const folder = folderMap.get(folderId)
+    if (!folder) {
+      toastDriveError('Share access unavailable', 'Folder not found.')
+      return
+    }
+
+    if (folder.ownerId !== currentUser?.id || folderHasSharedRootAncestor(folder, folderMap)) {
+      toastDriveError('Share access unavailable', 'Only the folder owner can share access.')
+      return
+    }
+
+    setShareFolderId(folderId)
+    setShareDialogOpen(true)
+  }
+
+  const saveShareFolderAccess = async (memberIds: string[]) => {
+    if (!shareFolderId || !shareFolder) {
+      toastDriveError('Share access failed', 'Folder not found.')
+      return
+    }
+
+    setSavingShareAccess(true)
+
+    try {
+      const { error } = await replaceDriveFolderMembers(shareFolderId, memberIds)
+
+      if (error) {
+        notify.error('Failed to share folder', { description: error.message })
+        return
+      }
+
+      setShareDialogOpen(false)
+      setShareFolderId(null)
+      await refreshDrive()
+      notify.success('Folder access updated')
+    } finally {
+      setSavingShareAccess(false)
+    }
+  }
+
+  const renameFolder = () => {
+    void (async () => {
+      if (state.view === 'trash') return
+
+      const folderId = renameFolderId
+      const folder = folderId ? folderMap.get(folderId) : null
+      const name = renameFolderName.trim()
+
+      if (!folderId || !folder) {
+        toastDriveError('Rename failed', 'Folder not found.')
+        return
+      }
+
+      if (isSharedRootFolder(folder)) {
+        toastDriveError('Rename failed', 'The shared root folder cannot be renamed.')
+        return
+      }
+
+      if (!name) {
+        toastDriveError('Rename failed', 'Folder name is required.')
+        return
+      }
+
+      const { error } = await supabase.rpc('rename_drive_folder', {
+        p_folder_id: folderId,
+        p_name: name,
+      })
+
+      if (error) {
+        notify.error('Folder rename failed', { description: error.message })
+        return
+      }
+
+      setRenameFolderOpen(false)
+      setRenameFolderId(null)
+      setRenameFolderName('')
+      await refreshDrive()
+      notify.success('Folder renamed')
+    })()
+  }
+
+  const supportsFolderSelection = () => typeof document !== 'undefined' && 'webkitdirectory' in document.createElement('input')
+
+  const getSiblingNameSet = (parentId: string | null, usedNamesByParent: Map<string | null, Set<string>>) => {
+    const existing = usedNamesByParent.get(parentId)
+    if (existing) return existing
+
+    const seeded = new Set((foldersByParent.get(parentId) ?? []).map((folder) => folder.name.trim().toLowerCase()))
+    usedNamesByParent.set(parentId, seeded)
+    return seeded
+  }
+
+  const resolveUniqueFolderName = (
+    parentId: string | null,
+    desiredName: string,
+    usedNamesByParent: Map<string | null, Set<string>>,
+  ) => {
+    const baseName = desiredName.trim() || 'Folder'
+    const siblingNames = getSiblingNameSet(parentId, usedNamesByParent)
+    let suffix = 0
+
+    while (true) {
+      const candidate = suffix === 0 ? baseName : `${baseName} (${suffix})`
+      const lowerCandidate = candidate.toLowerCase()
+      const isReservedRootName = parentId === null && lowerCandidate === 'shared'
+      if (!siblingNames.has(lowerCandidate) && !isReservedRootName) {
+        siblingNames.add(lowerCandidate)
+        return candidate
+      }
+      suffix += 1
+    }
+  }
+
+  const fetchDriveFolderId = async (parentId: string | null, name: string) => {
+    if (!currentOrganizationId) {
+      throw new Error('Select an organization before uploading folders.')
+    }
+
+    let query = supabase
+      .from('drive_folders')
+      .select('id')
+      .eq('organization_id', currentOrganizationId)
+      .eq('name', name)
+      .is('deleted_at', null)
+
+    if (parentId === null) {
+      if (!currentUser?.id) {
+        throw new Error('Your session is no longer valid. Sign in again and retry the upload.')
+      }
+      query = query.is('parent_id', null).eq('owner_id', currentUser.id)
+    } else {
+      query = query.eq('parent_id', parentId)
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: false }).limit(1).maybeSingle()
+    if (error || !data) {
+      throw new Error(error?.message ?? `Could not resolve folder "${name}".`)
+    }
+
+    return data.id
+  }
+
+  const createUploadFolderTree = async (
+    node: DriveUploadTreeNode,
+    parentFolderId: string | null,
+    usedNamesByParent: Map<string | null, Set<string>>,
+    folderIdsByPath: Map<string, string>,
+    failures: string[],
+  ) => {
+    for (const child of node.folders.values()) {
+      try {
+        const folderName = resolveUniqueFolderName(parentFolderId, child.name ?? 'Folder', usedNamesByParent)
+        const { error } = await supabase.rpc('create_drive_folder', {
+          p_organization_id: currentOrganizationId,
+          p_name: folderName,
+          p_parent_id: parentFolderId,
+        })
+
+        if (error) {
+          throw error
+        }
+
+        const childFolderId = await fetchDriveFolderId(parentFolderId, folderName)
+        folderIdsByPath.set(child.pathKey, childFolderId)
+        await createUploadFolderTree(child, childFolderId, usedNamesByParent, folderIdsByPath, failures)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : `Folder "${child.name ?? 'Folder'}" could not be created.`
+        failures.push(message)
+      }
+    }
+  }
+
+  const handleUploadEntries = async (entries: readonly DriveUploadEntry[], targetFolderId: string | null) => {
     if (state.view === 'trash') return
-    const entries = Array.from(files)
     if (entries.length === 0) return
-    const resolvedTargetFolderId = targetFolderId ?? null
-    if (!resolvedTargetFolderId) {
+
+    const hasFolderHierarchy = entries.some((entry) => entry.pathSegments.length > 1)
+    if (!hasFolderHierarchy && targetFolderId === null) {
       notify.error('Upload blocked', {
         description: 'Open a folder to upload files.',
       })
       return
     }
+
     setUploading(true)
-    setStatusMessage(null)
-    const resolvedTargetLabel =
-      folderMap.get(resolvedTargetFolderId)?.name ??
-      currentFolderLabel
-    const uploadBatch = entries.map((file, index) => ({
-      id: `${Date.now()}-${index}-${file.name}`,
-      name: file.name,
-      size: file.size,
+    const resolvedTargetLabel = folderMap.get(targetFolderId ?? '')?.name ?? currentFolderLabel
+    const uploadBatch = entries.map((entry, index) => ({
+      id: `${Date.now()}-${index}-${entry.relativePath}`,
+      name: hasFolderHierarchy ? entry.relativePath : entry.file.name,
+      size: entry.file.size,
       progress: 0,
       status: 'uploading' as const,
     }))
+    const uploadItemIdByPath = new Map(uploadBatch.map((item) => [item.name, item.id]))
     setUploadTargetLabel(resolvedTargetLabel)
     setUploadItems(uploadBatch)
 
@@ -924,9 +1243,52 @@ export function DocumentsPage() {
     }
 
     try {
+      const failures: string[] = []
+      const fileJobs: Array<{ entry: DriveUploadEntry; parentFolderId: string | null }> = []
+
+      if (!hasFolderHierarchy) {
+        if (targetFolderId === null) {
+          notify.error('Upload blocked', {
+            description: 'Open a folder to upload files.',
+          })
+          return
+        }
+
+        fileJobs.push(...entries.map((entry) => ({ entry, parentFolderId: targetFolderId })))
+      } else {
+        const uploadTree = buildDriveUploadTree(entries)
+        const usedNamesByParent = new Map<string | null, Set<string>>()
+        const folderIdsByPath = new Map<string, string>()
+
+        if (uploadTree.files.length > 0) {
+          if (targetFolderId === null) {
+            failures.push('Some files in the selected folder could not be placed because no destination folder is open.')
+          } else {
+            fileJobs.push(...uploadTree.files.map((entry) => ({ entry, parentFolderId: targetFolderId })))
+          }
+        }
+
+        await createUploadFolderTree(uploadTree, targetFolderId, usedNamesByParent, folderIdsByPath, failures)
+
+        const collectJobs = (node: DriveUploadTreeNode) => {
+          for (const child of node.folders.values()) {
+            const childFolderId = folderIdsByPath.get(child.pathKey)
+            if (!childFolderId) continue
+            fileJobs.push(...child.files.map((entry) => ({ entry, parentFolderId: childFolderId })))
+            collectJobs(child)
+          }
+        }
+
+        collectJobs(uploadTree)
+      }
+
       const results = await Promise.allSettled(
-        entries.map(async (file, index) => {
-          const itemId = uploadBatch[index]?.id ?? `${Date.now()}-${index}-${file.name}`
+        fileJobs.map(async ({ entry, parentFolderId }, index) => {
+          const itemId =
+            (hasFolderHierarchy
+              ? uploadItemIdByPath.get(entry.relativePath) ?? uploadItemIdByPath.get(entry.file.name)
+              : uploadBatch[index]?.id) ?? `${Date.now()}-${index}-${entry.file.name}`
+          const file = entry.file
 
           try {
             const upload = await uploadDriveDocumentToR2(file, undefined, (progress) => {
@@ -943,8 +1305,12 @@ export function DocumentsPage() {
               status: 'saving',
             }))
 
+            if (!parentFolderId) {
+              throw new Error('Open a destination folder before uploading files.')
+            }
+
             const { error } = await supabase.rpc('create_drive_document', {
-              p_folder_id: resolvedTargetFolderId,
+              p_folder_id: parentFolderId,
               p_storage_bucket: upload.bucket,
               p_storage_path: upload.key,
               p_file_name: file.name,
@@ -973,7 +1339,6 @@ export function DocumentsPage() {
         }),
       )
 
-      const failures: string[] = []
       for (const result of results) {
         if (result.status === 'rejected') {
           failures.push(result.reason instanceof Error ? result.reason.message : 'Upload failed.')
@@ -982,11 +1347,10 @@ export function DocumentsPage() {
 
       await refreshDrive()
 
+      const uploadedCount = results.filter((result) => result.status === 'fulfilled').length
       if (failures.length > 0) {
-        setStatusMessage(failures[0] ?? 'One or more uploads failed.')
+        toastDriveError('Upload failed', failures[0] ?? 'One or more uploads failed.')
       } else {
-        const uploadedCount = results.filter((result) => result.status === 'fulfilled').length
-        setStatusMessage(null)
         notify.success('Upload complete', {
           description: `${uploadedCount} document${uploadedCount === 1 ? '' : 's'} uploaded to ${resolvedTargetLabel}.`,
         })
@@ -996,11 +1360,63 @@ export function DocumentsPage() {
     }
   }
 
+  const handleUploadFiles = async (files: FileList | File[], targetFolderId?: string | null) => {
+    await handleUploadEntries(createDriveUploadEntriesFromFiles(Array.from(files)), targetFolderId ?? null)
+  }
+
+  const openFolderPicker = () => {
+    if (!supportsFolderSelection()) {
+      notify.error('Folder upload unavailable', {
+        description: 'This browser does not support folder selection. Upload files individually instead.',
+      })
+      return
+    }
+
+    if (folderInputRef.current) {
+      folderInputRef.current.value = ''
+    }
+    folderInputRef.current?.click()
+  }
+
+  const handleFolderInputChange = (files: FileList | null) => {
+    if (!files) return
+    void handleUploadEntries(createDriveUploadEntriesFromFiles(Array.from(files)), state.activeFolderId)
+  }
+
+  const handleDropUpload = async (event: DragEvent<HTMLElement>, targetFolderId: string | null) => {
+    event.preventDefault()
+    if (state.view === 'trash') return
+
+    if (hasFilePayload(event)) {
+      const draggedEntries = await collectDriveUploadEntriesFromDataTransfer(event.dataTransfer.items)
+      if (draggedEntries.length > 0) {
+        void handleUploadEntries(draggedEntries, targetFolderId)
+        setDragging(null)
+        setDropTarget(null)
+        return
+      }
+
+      if (targetFolderId === null) {
+        notify.error('Upload blocked', {
+          description: 'Open a folder to upload files.',
+        })
+        return
+      }
+
+      void handleUploadFiles(event.dataTransfer.files, targetFolderId)
+      setDragging(null)
+      setDropTarget(null)
+      return
+    }
+
+    handleDrop(targetFolderId)
+  }
+
   const moveFolder = async (folderId: string, targetFolderId: string | null) => {
     const folder = folderMap.get(folderId)
     if (!folder || state.view === 'trash') return
     if (isSharedRootFolder(folder)) {
-      setStatusMessage('Shared folder cannot be moved.')
+      toastDriveError('Move blocked', 'Shared folder cannot be moved.')
       return
     }
 
@@ -1017,7 +1433,7 @@ export function DocumentsPage() {
         p_before_folder_id: targetFolderId,
       })
       if (error) {
-        setStatusMessage(error.message)
+        toastDriveError('Folder move failed', error.message)
         return
       }
     } else {
@@ -1026,13 +1442,12 @@ export function DocumentsPage() {
         p_target_folder_id: targetFolderId,
       })
       if (error) {
-        setStatusMessage(error.message)
+        toastDriveError('Folder move failed', error.message)
         return
       }
     }
 
     await refreshDrive()
-    setStatusMessage(null)
     notify.success('Folder moved', {
       description: targetFolderId ? 'The folder was moved successfully.' : 'The folder was moved to My Drive.',
     })
@@ -1063,24 +1478,9 @@ export function DocumentsPage() {
     setDropTarget(null)
   }
 
-  const handleDropZone = (event: DragEvent<HTMLElement>, targetFolderId: string | null) => {
-    event.preventDefault()
+  const handleDropZone = async (event: DragEvent<HTMLElement>, targetFolderId: string | null) => {
     if (state.view === 'trash') return
-
-    if (hasFilePayload(event)) {
-      if (targetFolderId === null) {
-        notify.error('Upload blocked', {
-          description: 'Open a folder to upload files.',
-        })
-        return
-      }
-      void handleUpload(event.dataTransfer.files, targetFolderId)
-      setDragging(null)
-      setDropTarget(null)
-      return
-    }
-
-    handleDrop(targetFolderId)
+    await handleDropUpload(event, targetFolderId)
   }
 
   const startFolderDrag = (event: DragEvent<HTMLElement>, folderId: string) => {
@@ -1103,14 +1503,13 @@ export function DocumentsPage() {
     void (async () => {
       const { error } = await supabase.rpc('trash_drive_document', { p_document_id: documentId })
       if (error) {
-        setStatusMessage(error.message)
+        toastDriveError('Document move failed', error.message)
         return
       }
       if (previewDocumentId === documentId) {
         setPreviewDocumentId(null)
       }
       await refreshDrive()
-      setStatusMessage(null)
       notify.success('Document moved to trash')
     })()
   }
@@ -1119,11 +1518,10 @@ export function DocumentsPage() {
     void (async () => {
       const { error } = await supabase.rpc('restore_drive_document', { p_document_id: documentId })
       if (error) {
-        setStatusMessage(error.message)
+        toastDriveError('Document restore failed', error.message)
         return
       }
       await refreshDrive()
-      setStatusMessage(null)
       notify.success('Document restored')
     })()
   }
@@ -1132,20 +1530,18 @@ export function DocumentsPage() {
     void (async () => {
       const document = state.documents.find((item) => item.id === documentId)
       if (!document) {
-        setStatusMessage('Document not found')
+        toastDriveError('Document delete failed', 'Document not found.')
         return
       }
       try {
         await deleteDriveDocumentFromR2(document.storagePath)
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to delete document from storage.'
-        setStatusMessage(message)
         notify.error('Document delete failed', { description: message })
         return
       }
       const { error } = await supabase.rpc('delete_drive_document_permanently', { p_document_id: documentId })
       if (error) {
-        setStatusMessage(error.message)
         notify.error('Document delete failed', { description: error.message })
         return
       }
@@ -1153,7 +1549,6 @@ export function DocumentsPage() {
         setPreviewDocumentId(null)
       }
       await refreshDrive()
-      setStatusMessage(null)
       notify.success('Document deleted permanently')
     })()
   }
@@ -1162,16 +1557,15 @@ export function DocumentsPage() {
     void (async () => {
       const folder = folderMap.get(folderId)
       if (folder && isSharedRootFolder(folder)) {
-        setStatusMessage('Shared folder cannot be deleted.')
+        toastDriveError('Delete blocked', 'Shared folder cannot be deleted.')
         return
       }
       const { error } = await supabase.rpc('trash_drive_folder', { p_folder_id: folderId })
       if (error) {
-        setStatusMessage(error.message)
+        toastDriveError('Folder move failed', error.message)
         return
       }
       await refreshDrive()
-      setStatusMessage(null)
       notify.success('Folder moved to trash')
     })()
   }
@@ -1180,11 +1574,10 @@ export function DocumentsPage() {
     void (async () => {
       const { error } = await supabase.rpc('restore_drive_folder', { p_folder_id: folderId })
       if (error) {
-        setStatusMessage(error.message)
+        toastDriveError('Folder restore failed', error.message)
         return
       }
       await refreshDrive()
-      setStatusMessage(null)
       notify.success('Folder restored')
     })()
   }
@@ -1193,25 +1586,22 @@ export function DocumentsPage() {
     void (async () => {
       const folder = folderMap.get(folderId)
       if (folder && isSharedRootFolder(folder)) {
-        setStatusMessage('Shared folder cannot be deleted.')
+        toastDriveError('Delete blocked', 'Shared folder cannot be deleted.')
         return
       }
       try {
         await deleteDriveObjects(getFolderSubtreeDocumentPaths(folderId))
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to delete folder documents from storage.'
-        setStatusMessage(message)
         notify.error('Folder delete failed', { description: message })
         return
       }
       const { error } = await supabase.rpc('delete_drive_folder_permanently', { p_folder_id: folderId })
       if (error) {
-        setStatusMessage(error.message)
         notify.error('Folder delete failed', { description: error.message })
         return
       }
       await refreshDrive()
-      setStatusMessage(null)
       notify.success('Folder deleted permanently')
     })()
   }
@@ -1222,18 +1612,15 @@ export function DocumentsPage() {
         await deleteDriveObjects(trashedDocuments.map((document) => document.storagePath))
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to delete trashed files from storage.'
-        setStatusMessage(message)
         notify.error('Trash clear failed', { description: message })
         return
       }
       const { error } = await supabase.rpc('clear_drive_trash')
       if (error) {
-        setStatusMessage(error.message)
         notify.error('Trash clear failed', { description: error.message })
         return
       }
       await refreshDrive()
-      setStatusMessage(null)
       notify.success('Trash cleared')
     })()
   }
@@ -1247,15 +1634,17 @@ export function DocumentsPage() {
       const childDocuments = state.documents.filter((document) => document.folderId === folder.id).length
       const isActive = folder.id === activeFolderId
       const isDropTarget = dropTarget === folder.id
-      const isSharedRoot = isSharedRootFolder(folder)
+      const canEditFolder = folder.ownerId === currentUser?.id || folderHasSharedRootAncestor(folder, folderMap)
+      const sharedMemberCount = getFolderSharedMemberCount(folder.id)
+      const sharedFolder = isSharedFolder(folder, folderMap, sharedMemberCount)
 
       return (
         <div key={folder.id} className='space-y-1'>
           <button
             type='button'
-            draggable={!isSharedRoot}
+            draggable={canEditFolder}
             onDragStart={(event) => {
-              if (isSharedRoot) return
+              if (!canEditFolder) return
               startFolderDrag(event, folder.id)
             }}
             onDragEnd={() => setDragging(null)}
@@ -1268,10 +1657,10 @@ export function DocumentsPage() {
             onDragLeave={() => {
               if (dropTarget === folder.id) setDropTarget(null)
             }}
-            onDrop={(event) => handleDropZone(event, folder.id)}
+            onDrop={(event) => void handleDropZone(event, folder.id)}
             className={cn(
               'flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors',
-              isSharedRoot ? 'cursor-default' : 'cursor-grab active:cursor-grabbing',
+              canEditFolder ? 'cursor-grab active:cursor-grabbing' : 'cursor-default',
               isActive ? 'bg-primary/10 text-primary' : 'text-foreground/90 hover:bg-accent hover:text-accent-foreground',
               isDropTarget && 'bg-primary/10 ring-2 ring-primary/30',
             )}
@@ -1282,6 +1671,15 @@ export function DocumentsPage() {
             </span>
             <FolderMark className='h-4 w-5' />
             <span className='min-w-0 flex-1 truncate'>{folder.name}</span>
+            {sharedFolder ? (
+              <span
+                className='inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-primary/15 bg-primary/5 text-primary'
+                aria-label='Shared folder'
+                title='Shared folder'
+              >
+                <Users className='h-3.5 w-3.5' />
+              </span>
+            ) : null}
             <span className='text-xs text-muted-foreground tabular-nums'>
               {childFolders.length + childDocuments}
             </span>
@@ -1356,17 +1754,23 @@ export function DocumentsPage() {
         onChange={(event) => {
           const files = event.target.files
           if (files) {
-            void handleUpload(files, state.activeFolderId)
+            void handleUploadFiles(files, state.activeFolderId)
             event.target.value = ''
           }
         }}
       />
 
-      {statusMessage ? (
-        <div className='rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive'>
-          {statusMessage}
-        </div>
-      ) : null}
+      <input
+        ref={folderInputRef}
+        type='file'
+        multiple
+        accept={DRIVE_ACCEPT}
+        className='hidden'
+        onChange={(event) => {
+          handleFolderInputChange(event.target.files)
+          event.target.value = ''
+        }}
+      />
 
       {uploadItems.length > 0 ? (
         <div className='fixed right-4 top-4 z-50 w-[min(24rem,calc(100vw-2rem))] sm:right-6 sm:top-6'>
@@ -1405,7 +1809,6 @@ export function DocumentsPage() {
                       <p className='mt-1 text-xs text-muted-foreground'>
                         {formatBytes(activeUploadItem.size)} · {Math.round(activeUploadItem.progress)}%
                         {uploadTargetLabel ? ` · ${uploadTargetLabel}` : ''}
-                        {activeUploadItem.status === 'error' && activeUploadItem.error ? ` · ${activeUploadItem.error}` : ''}
                       </p>
                     </div>
                   </div>
@@ -1463,7 +1866,6 @@ export function DocumentsPage() {
                             <p className='truncate text-sm font-medium text-foreground'>{item.name}</p>
                             <p className='mt-1 text-xs text-muted-foreground'>
                               {formatBytes(item.size)} · {statusLabel}
-                              {item.status === 'error' && item.error ? ` · ${item.error}` : ''}
                             </p>
                           </div>
                         </div>
@@ -1509,7 +1911,7 @@ export function DocumentsPage() {
               onDragLeave={() => {
                 if (dropTarget === 'root') setDropTarget(null)
               }}
-              onDrop={(event) => handleDropZone(event, null)}
+              onDrop={(event) => void handleDropZone(event, null)}
               className={cn(
                 'flex w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground',
                 activeFolderId === null ? 'bg-primary/10 text-primary' : 'bg-background text-foreground',
@@ -1537,7 +1939,7 @@ export function DocumentsPage() {
                 onDragLeave={() => {
                   if (dropTarget === 'root') setDropTarget(null)
                 }}
-                onDrop={(event) => handleDropZone(event, null)}
+                onDrop={(event) => void handleDropZone(event, null)}
                 className={cn(
                   'flex w-full items-center gap-2 rounded-md border border-dashed border-border/70 px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground',
                   dropTarget === 'root' && 'border-primary/40 bg-primary/10 text-primary',
@@ -1553,6 +1955,27 @@ export function DocumentsPage() {
           </div>
 
           <div className='mt-4 border-t border-border/70 pt-4'>
+            <div className='mb-3 rounded-xl border border-border/70 bg-background px-3 py-3 shadow-sm'>
+              <div className='flex items-start justify-between gap-3'>
+                <div className='min-w-0'>
+                  <div className='flex items-center gap-2'>
+                    <HardDrive className='h-4 w-4 shrink-0 text-primary' />
+                    <p className='text-sm font-semibold text-foreground'>Storage</p>
+                  </div>
+                  <p className='mt-1 text-xs text-muted-foreground'>
+                    <span className='font-medium text-primary'>{formatBytes(storageUsedBytes)}</span> used of{' '}
+                    <span className='font-medium text-foreground'>{formatBytes(storageCapacityBytes)}</span>{' '}
+                    <span className='text-muted-foreground'>({storageUsagePercent}%)</span>
+                  </p>
+                </div>
+              </div>
+              <div className='mt-3 h-2 overflow-hidden rounded-full bg-muted/70'>
+                <div
+                  className='h-full rounded-full bg-gradient-to-r from-primary/70 via-primary to-primary/85 shadow-[0_0_0_1px_hsl(var(--primary)/0.12)] transition-[width] duration-300 ease-out'
+                  style={{ width: `${storageUsagePercent}%` }}
+                />
+              </div>
+            </div>
             <button
               type='button'
               onClick={openTrash}
@@ -1596,7 +2019,7 @@ export function DocumentsPage() {
             onDrop={
               isTrashView
                 ? undefined
-                : (event) => handleDropZone(event, activeFolderId)
+                : (event) => void handleDropZone(event, activeFolderId)
             }
           >
             {folderContentDropActive ? (
@@ -1732,6 +2155,10 @@ export function DocumentsPage() {
                         Upload
                       </Button>
                     ) : null}
+                    <Button type='button' variant='outline' className='h-10 gap-2' disabled={uploading} onClick={openFolderPicker}>
+                      <FolderUp className='h-4 w-4' />
+                      Upload folder
+                    </Button>
                   </>
                 )}
               </div>
@@ -1858,16 +2285,19 @@ export function DocumentsPage() {
                     </div>
 
                     {currentFolders.length > 0 ? (
-                      <div
-                        className={cn(
+                        <div
+                          className={cn(
                           'grid gap-4 sm:grid-cols-2',
-                          documentLayout === 'list' ? 'lg:grid-cols-3 xl:grid-cols-4' : 'xl:grid-cols-3 2xl:grid-cols-4',
+                          documentLayout === 'list' ? 'lg:grid-cols-3' : 'xl:grid-cols-3',
                         )}
                       >
                         {currentFolders.map((folder) => {
                           const isActive = folder.id === activeFolderId
                           const isTarget = dropTarget === folder.id
-                          const isSharedRoot = isSharedRootFolder(folder)
+                          const canEditFolder = folder.ownerId === currentUser?.id || folderHasSharedRootAncestor(folder, folderMap)
+                          const canShareFolder = folder.ownerId === currentUser?.id && !folderHasSharedRootAncestor(folder, folderMap)
+                          const sharedMemberCount = getFolderSharedMemberCount(folder.id)
+                          const sharedFolder = isSharedFolder(folder, folderMap, sharedMemberCount)
                           const childDocuments = state.documents.filter((document) => document.folderId === folder.id && document.deletedAt === null).length
                           const childFolders = foldersByParent.get(folder.id)?.length ?? 0
                           const overview = folderOverview.get(folder.id)
@@ -1878,9 +2308,9 @@ export function DocumentsPage() {
                           return (
                             <div
                               key={folder.id}
-                              draggable={!isSharedRoot}
+                              draggable={canEditFolder}
                               onDragStart={(event) => {
-                                if (isSharedRoot) return
+                                if (!canEditFolder) return
                                 startFolderDrag(event, folder.id)
                               }}
                               onDragEnd={() => setDragging(null)}
@@ -1892,7 +2322,7 @@ export function DocumentsPage() {
                               onDragLeave={() => {
                                 if (dropTarget === folder.id) setDropTarget(null)
                               }}
-                              onDrop={(event) => handleDropZone(event, folder.id)}
+                              onDrop={(event) => void handleDropZone(event, folder.id)}
                               role='button'
                               tabIndex={0}
                               onClick={() => openFolder(folder.id)}
@@ -1904,62 +2334,184 @@ export function DocumentsPage() {
                               }}
                               className={cn(
                                 'group relative overflow-hidden border border-border/70 bg-card/80 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md',
-                                compactFolderLayout ? 'rounded-2xl p-3' : 'rounded-[1.6rem] p-4',
-                                isSharedRoot ? 'cursor-default' : 'cursor-grab active:cursor-grabbing',
+                                compactFolderLayout ? 'rounded-2xl px-3 py-2.5' : 'rounded-[1.6rem] p-4',
+                                canEditFolder ? 'cursor-grab active:cursor-grabbing' : 'cursor-default',
                                 isActive && 'border-primary/40 bg-primary/5',
                                 isTarget && 'ring-2 ring-primary/30',
                               )}
                             >
-                              <div className='absolute right-3 top-3 z-10'>
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button
-                                      type='button'
-                                      variant='ghost'
-                                      size='icon'
-                                      className='h-8 w-8 text-muted-foreground transition-colors hover:text-foreground'
+                              {compactFolderLayout ? (
+                                <div className='flex items-center gap-3'>
+                                  <FolderMark active={isActive} className='h-8 w-10 shrink-0' />
+                                  <div className='flex min-w-0 flex-1 items-center gap-2'>
+                                    <p className='min-w-0 flex-1 truncate text-sm font-semibold text-foreground'>{folder.name}</p>
+                                    {sharedFolder ? (
+                                      <span
+                                        className='inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-primary/15 bg-primary/5 text-primary'
+                                        aria-label='Shared folder'
+                                        title='Shared folder'
+                                      >
+                                        <Users className='h-3.5 w-3.5' />
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button
+                                        type='button'
+                                        variant='ghost'
+                                        size='icon'
+                                        className='h-8 w-8 shrink-0 text-muted-foreground transition-colors hover:text-foreground'
+                                        onClick={(event) => event.stopPropagation()}
+                                      >
+                                        <MoreVertical className='h-4 w-4' />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent
+                                      align='end'
+                                      className='w-fit min-w-0'
                                       onClick={(event) => event.stopPropagation()}
                                     >
-                                      <MoreVertical className='h-4 w-4' />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align='end' className='w-fit min-w-0'>
-                                    <DropdownMenuItem
-                                      className='gap-2 whitespace-nowrap pr-3'
-                                      onSelect={() => {
-                                        openFolder(folder.id)
-                                      }}
-                                    >
-                                      <ArrowUpRight className='h-4 w-4' />
-                                      Open
-                                    </DropdownMenuItem>
-                                    {!isSharedRoot ? (
                                       <DropdownMenuItem
-                                        className='gap-2 whitespace-nowrap pr-3 text-destructive'
+                                        className='gap-2 whitespace-nowrap pr-3'
                                         onSelect={() => {
-                                          softDeleteFolder(folder.id)
+                                          openFolder(folder.id)
                                         }}
                                       >
-                                        <Trash2 className='h-4 w-4' />
-                                        Move to trash
+                                        <ArrowUpRight className='h-4 w-4' />
+                                        Open
                                       </DropdownMenuItem>
-                                    ) : null}
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              </div>
-
-                              <div className={cn('min-w-0', compactFolderLayout ? 'flex items-center gap-3 pr-10' : 'flex flex-col items-start pt-4')}>
-                                <FolderMark active={isActive} className={compactFolderLayout ? 'h-8 w-10 shrink-0' : 'h-24 w-32'} />
-                                <div className={cn('min-w-0', compactFolderLayout ? 'flex-1' : 'mt-3')}>
-                                  <p className='truncate text-sm font-semibold text-foreground'>{folder.name}</p>
-                                  {!compactFolderLayout ? (
-                                    <p className='mt-1 text-xs text-muted-foreground'>
-                                      {folderCount} subfolder{folderCount === 1 ? '' : 's'} · {documentCount} document
-                                      {documentCount === 1 ? '' : 's'}
-                                    </p>
-                                  ) : null}
+                                      {canShareFolder ? (
+                                        <DropdownMenuItem
+                                          className='gap-2 whitespace-nowrap pr-3'
+                                          onSelect={(event) => {
+                                            event.stopPropagation()
+                                            openShareFolder(folder.id)
+                                          }}
+                                        >
+                                          <Share2 className='h-4 w-4' />
+                                          Share access
+                                        </DropdownMenuItem>
+                                      ) : null}
+                                      {canEditFolder ? (
+                                        <DropdownMenuItem
+                                          className='gap-2 whitespace-nowrap pr-3'
+                                          onSelect={(event) => {
+                                            event.stopPropagation()
+                                            openRenameFolder(folder.id)
+                                          }}
+                                        >
+                                          <FileType className='h-4 w-4' />
+                                          Rename
+                                        </DropdownMenuItem>
+                                      ) : null}
+                                      {canEditFolder ? (
+                                        <DropdownMenuItem
+                                          className='gap-2 whitespace-nowrap pr-3 text-destructive'
+                                          onSelect={() => {
+                                            softDeleteFolder(folder.id)
+                                          }}
+                                        >
+                                          <Trash2 className='h-4 w-4' />
+                                          Move to trash
+                                        </DropdownMenuItem>
+                                      ) : null}
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
                                 </div>
-                              </div>
+                              ) : (
+                                <>
+                                  <div className='absolute right-3 top-3 z-10'>
+                                    <DropdownMenu>
+                                      <DropdownMenuTrigger asChild>
+                                        <Button
+                                          type='button'
+                                          variant='ghost'
+                                          size='icon'
+                                          className='h-8 w-8 text-muted-foreground transition-colors hover:text-foreground'
+                                          onClick={(event) => event.stopPropagation()}
+                                        >
+                                          <MoreVertical className='h-4 w-4' />
+                                        </Button>
+                                      </DropdownMenuTrigger>
+                                      <DropdownMenuContent
+                                        align='end'
+                                        className='w-fit min-w-0'
+                                        onClick={(event) => event.stopPropagation()}
+                                      >
+                                        <DropdownMenuItem
+                                          className='gap-2 whitespace-nowrap pr-3'
+                                          onSelect={() => {
+                                            openFolder(folder.id)
+                                          }}
+                                        >
+                                          <ArrowUpRight className='h-4 w-4' />
+                                          Open
+                                        </DropdownMenuItem>
+                                        {canShareFolder ? (
+                                          <DropdownMenuItem
+                                            className='gap-2 whitespace-nowrap pr-3'
+                                            onSelect={(event) => {
+                                              event.stopPropagation()
+                                              openShareFolder(folder.id)
+                                            }}
+                                          >
+                                            <Share2 className='h-4 w-4' />
+                                            Share access
+                                          </DropdownMenuItem>
+                                        ) : null}
+                                        {canEditFolder ? (
+                                          <DropdownMenuItem
+                                            className='gap-2 whitespace-nowrap pr-3'
+                                            onSelect={(event) => {
+                                              event.stopPropagation()
+                                              openRenameFolder(folder.id)
+                                            }}
+                                          >
+                                            <FileType className='h-4 w-4' />
+                                            Rename
+                                          </DropdownMenuItem>
+                                        ) : null}
+                                        {canEditFolder ? (
+                                          <DropdownMenuItem
+                                            className='gap-2 whitespace-nowrap pr-3 text-destructive'
+                                            onSelect={() => {
+                                              softDeleteFolder(folder.id)
+                                            }}
+                                          >
+                                            <Trash2 className='h-4 w-4' />
+                                            Move to trash
+                                          </DropdownMenuItem>
+                                        ) : null}
+                                      </DropdownMenuContent>
+                                    </DropdownMenu>
+                                  </div>
+
+                                  <div className='flex min-w-0 flex-col items-start pt-4'>
+                                    <FolderMark active={isActive} className='h-24 w-32' />
+                                    <div className='mt-3 min-w-0'>
+                                      <div className='flex min-w-0 items-center gap-2'>
+                                        <p className='min-w-0 flex-1 truncate text-sm font-semibold text-foreground'>{folder.name}</p>
+                                        {sharedFolder ? (
+                                          <span
+                                            className='inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-primary/15 bg-primary/5 text-primary'
+                                            aria-label='Shared folder'
+                                            title='Shared folder'
+                                          >
+                                            <Users className='h-3.5 w-3.5' />
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                      <div className='mt-1 space-y-1'>
+                                        <p className='text-xs text-muted-foreground'>
+                                          {folderCount} subfolder{folderCount === 1 ? '' : 's'} · {documentCount} document
+                                          {documentCount === 1 ? '' : 's'}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </>
+                              )}
                             </div>
                           )
                         })}
@@ -2250,6 +2802,71 @@ export function DocumentsPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={renameFolderOpen}
+        onOpenChange={(open) => {
+          setRenameFolderOpen(open)
+          if (!open) {
+            setRenameFolderId(null)
+            setRenameFolderName('')
+          }
+        }}
+      >
+        <DialogContent className='max-w-md overflow-hidden p-0'>
+          <DialogHeader className='border-b px-6 py-5 text-left'>
+            <DialogTitle>Rename folder</DialogTitle>
+            <DialogDescription>Update the folder name in {currentFolderLabel}.</DialogDescription>
+          </DialogHeader>
+          <div className='space-y-5 px-6 py-5'>
+            <div className='space-y-2'>
+              <label className='text-sm font-medium text-foreground'>Folder name</label>
+              <Input
+                value={renameFolderName}
+                onChange={(event) => setRenameFolderName(event.target.value)}
+                placeholder='Folder name'
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    renameFolder()
+                  }
+                }}
+              />
+            </div>
+            <div className='flex items-center justify-end gap-3 pt-1'>
+              <Button
+                type='button'
+                variant='outline'
+                onClick={() => {
+                  setRenameFolderOpen(false)
+                  setRenameFolderId(null)
+                  setRenameFolderName('')
+                }}
+              >
+                Cancel
+              </Button>
+              <Button type='button' onClick={renameFolder} disabled={!renameFolderName.trim()}>
+                Save changes
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <FolderShareDialog
+        open={shareDialogOpen}
+        onOpenChange={(open) => {
+          setShareDialogOpen(open)
+          if (!open) {
+            setShareFolderId(null)
+          }
+        }}
+        folderName={shareFolder?.name ?? 'Selected folder'}
+        members={shareableMembers}
+        initialSelectedMemberIds={shareFolderMemberIds}
+        onSave={saveShareFolderAccess}
+        saving={savingShareAccess}
+      />
+
       <DocumentViewerModal
         open={Boolean(selectedDocument)}
         title={selectedDocument?.name ?? 'Document preview'}
@@ -2260,7 +2877,6 @@ export function DocumentsPage() {
         loading={previewLoading}
         csvRows={selectedDocumentCsvRows}
         csvLoading={csvPreviewLoading}
-        csvError={csvPreviewError}
         onClose={() => setPreviewDocumentId(null)}
         headerActions={
           selectedDocument ? (

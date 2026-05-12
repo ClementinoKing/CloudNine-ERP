@@ -7,6 +7,7 @@ import { router } from '@/app/router'
 import { AppProviders } from '@/app/providers'
 import { Button } from '@/components/ui/button'
 import { ErrorSpacePage } from '@/features/errors/components/error-space-page'
+import { installGlobalPromiseRejectionGuard } from '@/lib/promise-errors'
 
 import './index.css'
 
@@ -43,6 +44,7 @@ function suppressNoisyImageLogs() {
 }
 
 applyInitialTheme()
+installGlobalPromiseRejectionGuard()
 
 if (import.meta.env.DEV) {
   suppressNoisyImageLogs()

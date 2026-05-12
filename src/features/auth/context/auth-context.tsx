@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useReducer,
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js'
 
 import { APP_STORAGE_PREFIX, LEGACY_STORAGE_PREFIX, STORAGE_KEYS } from '@/lib/storage'
+import { resolveR2ObjectUrl } from '@/lib/r2'
 import { supabase } from '@/lib/supabase'
 import type { AccountStatus, AuthSession, LoginPayload, OnboardingState, RegisterPayload, SocialAuthProvider, User } from '@/types/auth'
 
@@ -32,6 +33,7 @@ export interface AuthContextValue {
   updateCurrentUser: (updates: Partial<User>) => void
   updateOnboarding: (updates: Partial<OnboardingState>) => void
   completeOnboarding: (updates?: Partial<OnboardingState>) => Promise<void>
+  refreshCurrentUserProfile: (options?: { avatarUrl?: string | null; avatarPath?: string | null }) => Promise<void>
   logout: (options?: { accessNotice?: string }) => Promise<void>
 }
 
@@ -330,7 +332,11 @@ function mapSupabaseSession(session: Session): AuthSession {
   }
 }
 
-function mergeProfileIntoSession(session: AuthSession, profile: ProfileSnapshot): AuthSession {
+function mergeProfileIntoSession(
+  session: AuthSession,
+  profile: ProfileSnapshot,
+  avatarOverride?: { avatarUrl?: string | null; avatarPath?: string | null },
+): AuthSession {
   const accountStatus = profile.account_status ?? 'active'
   const avatarValue = profile.avatar_url ?? null
 
@@ -345,11 +351,76 @@ function mergeProfileIntoSession(session: AuthSession, profile: ProfileSnapshot)
       accountStatus,
       mustResetPassword: profile.must_reset_password ?? session.user.mustResetPassword,
       jobTitle: profile.job_title ?? session.user.jobTitle,
-      avatarUrl: sanitizeAvatarUrl(avatarValue) ?? session.user.avatarUrl,
-      avatarPath: sanitizeAvatarPath(avatarValue) ?? session.user.avatarPath,
+      avatarUrl: avatarOverride?.avatarUrl ?? sanitizeAvatarUrl(avatarValue) ?? session.user.avatarUrl,
+      avatarPath: avatarOverride?.avatarPath ?? sanitizeAvatarPath(avatarValue) ?? session.user.avatarPath,
       onboarding: createOnboardingFromProfile(profile, profile.full_name ?? session.user.name),
     },
   }
+}
+
+async function resolveProfileAvatar(
+  profile: ProfileSnapshot,
+  fallbackAvatarUrl?: string | null,
+  fallbackAvatarPath?: string | null,
+) {
+  const avatarValue = profile.avatar_url ?? null
+  if (sanitizeAvatarUrl(avatarValue)) {
+    return {
+      avatarUrl: sanitizeAvatarUrl(avatarValue) ?? fallbackAvatarUrl ?? undefined,
+      avatarPath: sanitizeAvatarPath(avatarValue) ?? fallbackAvatarPath ?? undefined,
+    }
+  }
+
+  const avatarPath = sanitizeAvatarPath(avatarValue) ?? fallbackAvatarPath ?? undefined
+  if (!avatarPath) {
+    return {
+      avatarUrl: fallbackAvatarUrl ?? undefined,
+      avatarPath: fallbackAvatarPath ?? undefined,
+    }
+  }
+
+  try {
+    const avatarUrl = await resolveR2ObjectUrl(avatarPath)
+    return {
+      avatarUrl,
+      avatarPath,
+    }
+  } catch {
+    return {
+      avatarUrl: fallbackAvatarUrl ?? undefined,
+      avatarPath,
+    }
+  }
+}
+
+function buildProfileSnapshotKey(
+  userId: string,
+  profile: ProfileSnapshot,
+  avatarUrl: string | null,
+  avatarPath: string | null,
+) {
+  return JSON.stringify({
+    userId,
+    organization_id: profile.organization_id ?? null,
+    active_organization_id: profile.active_organization_id ?? null,
+    organization_name: profile.organization_name ?? null,
+    organization_industry: profile.organization_industry ?? null,
+    full_name: profile.full_name ?? null,
+    email: profile.email ?? null,
+    username: profile.username ?? null,
+    role_label: profile.role_label ?? null,
+    account_status: profile.account_status ?? 'active',
+    must_reset_password: profile.must_reset_password ?? false,
+    job_title: profile.job_title ?? null,
+    avatar_url: avatarUrl,
+    avatar_path: avatarPath,
+    onboarding_completed: profile.onboarding_completed ?? false,
+    onboarding_step: profile.onboarding_step ?? 'organization',
+    onboarding_role: profile.onboarding_role ?? null,
+    onboarding_work_function: profile.onboarding_work_function ?? null,
+    onboarding_use_case: profile.onboarding_use_case ?? null,
+    onboarding_tools: profile.onboarding_tools ?? [],
+  })
 }
 
 function createInitialAuthState(): AuthState {
@@ -542,6 +613,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [state.session?.user.id],
   )
 
+  const refreshCurrentUserProfile = useCallback(
+    async (options?: { avatarUrl?: string | null; avatarPath?: string | null }) => {
+      const session = state.session
+      if (!session?.user.id) return
+
+      const profile = await fetchProfileSnapshot(session.user.id)
+      if (!profile) {
+        dispatch({ type: 'SET_PROFILE_STATUS', payload: { hasProfile: false, loading: false } })
+        return
+      }
+
+      const accountStatus = profile.account_status ?? 'active'
+      if (accountStatus !== 'active') {
+        void logout({ accessNotice: getAccessDeniedMessage(accountStatus) })
+        return
+      }
+
+      const avatarOverride = await resolveProfileAvatar(
+        profile,
+        options?.avatarUrl ?? session.user.avatarUrl,
+        options?.avatarPath ?? session.user.avatarPath,
+      )
+      const nextSession = mergeProfileIntoSession(session, profile, avatarOverride)
+
+      const nextSnapshotKey = buildProfileSnapshotKey(
+        session.user.id,
+        profile,
+        nextSession.user.avatarUrl ?? null,
+        nextSession.user.avatarPath ?? null,
+      )
+
+      if (lastProfileSnapshotKeyRef.current === nextSnapshotKey) {
+        dispatch({ type: 'SET_PROFILE_STATUS', payload: { hasProfile: true, loading: false } })
+        return
+      }
+
+      lastProfileSnapshotKeyRef.current = nextSnapshotKey
+      writeCachedProfile({
+        id: session.user.id,
+        ...profile,
+        account_status: accountStatus,
+        deactivated_at: profile.deactivated_at ?? null,
+        deleted_at: profile.deleted_at ?? null,
+      })
+      dispatch({ type: 'SET_SESSION', payload: nextSession })
+      dispatch({ type: 'SET_PROFILE_STATUS', payload: { hasProfile: true, loading: false } })
+    },
+    [logout, state.session],
+  )
+
   useEffect(() => {
     let mounted = true
 
@@ -588,7 +709,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false
     dispatch({ type: 'SET_PROFILE_STATUS', payload: { hasProfile: state.hasProfile, loading: true } })
 
-    void fetchProfileSnapshot(state.session.user.id).then((profile) => {
+    void fetchProfileSnapshot(state.session.user.id).then(async (profile) => {
       if (cancelled) return
 
       if (!profile) {
@@ -602,7 +723,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return
       }
 
-      const nextSession = mergeProfileIntoSession(state.session!, profile)
+      const avatarOverride = await resolveProfileAvatar(profile, state.session?.user.avatarUrl, state.session?.user.avatarPath)
+      const nextSession = mergeProfileIntoSession(state.session!, profile, avatarOverride)
       writeCachedProfile({
         id: state.session!.user.id,
         ...profile,
@@ -625,7 +747,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false
     const userId = state.session.user.id
 
-    void fetchProfileSnapshot(userId).then((profile) => {
+    void fetchProfileSnapshot(userId).then(async (profile) => {
       if (cancelled || !profile) return
 
       const accountStatus = profile.account_status ?? 'active'
@@ -634,7 +756,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return
       }
 
-      const avatarValue = profile.avatar_url ?? null
+      const avatarOverride = await resolveProfileAvatar(profile, state.session?.user.avatarUrl, state.session?.user.avatarPath)
       const nextSnapshotKey = JSON.stringify({
         userId,
         organization_id: profile.organization_id ?? null,
@@ -648,7 +770,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         account_status: accountStatus,
         must_reset_password: profile.must_reset_password ?? false,
         job_title: profile.job_title ?? null,
-        avatar_url: avatarValue,
+        avatar_url: avatarOverride.avatarUrl ?? null,
         onboarding_completed: profile.onboarding_completed ?? false,
         onboarding_step: profile.onboarding_step ?? 'organization',
         onboarding_role: profile.onboarding_role ?? null,
@@ -667,7 +789,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         deactivated_at: profile.deactivated_at ?? null,
         deleted_at: profile.deleted_at ?? null,
       })
-      const nextSession = mergeProfileIntoSession(state.session!, profile)
+      const nextSession = mergeProfileIntoSession(state.session!, profile, avatarOverride)
 
       dispatch({ type: 'SET_SESSION', payload: nextSession })
     })
@@ -825,6 +947,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       updateCurrentUser,
       updateOnboarding,
       completeOnboarding,
+      refreshCurrentUserProfile,
       logout,
     }),
     [
@@ -832,6 +955,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       logout,
       register,
+      refreshCurrentUserProfile,
       sendPasswordResetEmail,
       signInWithSocialProvider,
       state.hasProfile,

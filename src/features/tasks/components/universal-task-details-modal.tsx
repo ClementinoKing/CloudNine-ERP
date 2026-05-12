@@ -30,6 +30,7 @@ import { ProjectPickerPopover } from '@/features/projects/components/project-pic
 import { dispatchNotificationEmails } from '@/features/notifications/lib/email-delivery'
 import { CreateTaskDialog, type CreatedTaskPayload } from '@/features/tasks/components/create-task-dialog'
 import { consumePendingTaskDetailsModalId, peekPendingTaskDetailsModalId } from '@/features/tasks/lib/open-task-details-modal'
+import { reassignTaskAssignees } from '@/features/tasks/lib/task-assignment'
 import {
   legacyBoardColumnForStatusKey,
   mapStatusRowsToOptions,
@@ -119,6 +120,10 @@ function mentionHandleForMember(member: { name: string; username?: string | null
     .toLowerCase()
     .replace(/\s+/g, '_')
     .replace(/[^a-z0-9._-]/g, '')
+}
+
+function isPersistedStatusId(value?: string | null) {
+  return Boolean(value && !value.startsWith('fallback-'))
 }
 
 function extractMentionedMemberIds(text: string, members: Array<{ id: string; name: string; username?: string | null }>) {
@@ -725,75 +730,81 @@ export function UniversalTaskDetailsModal() {
       window.clearTimeout(saveStateResetTimerRef.current)
       saveStateResetTimerRef.current = null
     }
+    if (persistAssignees) {
+      const { error: assignmentError } = await reassignTaskAssignees([taskId], nextAssigneeIds)
+      if (assignmentError) {
+        console.error('Failed to save task assignees', assignmentError)
+        setSaveState('error')
+        return
+      }
+    }
+
     const { error: taskError } = await supabase
       .from('tasks')
       .update({
         title: next.title.trim() || 'Untitled task',
         description: next.description?.trim() || null,
-        status_id: next.status_id ?? null,
+        status_id: isPersistedStatusId(next.status_id) ? next.status_id : null,
         status: next.status ?? 'planned',
         priority: next.priority ?? 'low',
         project_id: next.project_id || null,
         start_at: next.start_at,
         due_at: next.due_at,
-        board_column: next.board_column,
         completed_at: next.completed_at,
       })
       .eq('id', taskId)
 
-    if (!taskError) {
+    if (taskError) {
       if (persistAssignees) {
-        await supabase.from('task_assignees').delete().eq('task_id', taskId)
-        if (nextAssigneeIds.length > 0) {
-          await supabase.from('task_assignees').insert(nextAssigneeIds.map((assigneeId) => ({ task_id: taskId, assignee_id: assigneeId })))
+        const { error: revertError } = await reassignTaskAssignees([taskId], previousAssigneeIds)
+        if (revertError) {
+          console.error('Failed to restore task assignees after task save error', revertError)
         }
       }
-
-      if (currentUser?.id) {
-        if (persistAssignees) {
-          const addedAssigneeIds = nextAssigneeIds.filter((assigneeId) => !previousAssigneeIds.includes(assigneeId) && assigneeId !== currentUser.id)
-          if (addedAssigneeIds.length > 0) {
-            const notifications = addedAssigneeIds.map((recipientId) => ({
-              id: crypto.randomUUID(),
-              recipient_id: recipientId,
-              actor_id: currentUser.id,
-              task_id: taskId,
-              type: 'task' as const,
-              title: 'Task assigned to you',
-              message: `You were assigned "${next.title || previousTask?.title || 'a task'}".`,
-              metadata: { event: 'task_assigned', source: 'global_task_modal_assignment' },
-            }))
-            const { error: notificationsError } = await supabase.from('notifications').insert(notifications)
-            if (notificationsError) {
-              console.error('Failed to create assignment notifications from global task modal', notificationsError)
-            } else {
-              void dispatchNotificationEmails(
-                notifications.map((item) => ({
-                    notificationId: item.id,
-                    recipientId: item.recipient_id,
-                    recipientEmail: members.find((member) => member.id === item.recipient_id)?.email ?? undefined,
-                    type: 'task_assigned' as const,
-                    taskId: item.task_id as string,
-                    taskTitle: next.title || previousTask?.title || 'a task',
-                    actorName: currentUser.name ?? currentUser.email ?? 'A teammate',
-                  })),
-              )
-            }
-          }
-        }
-
-      }
-
-      setTask(next)
-      setAssigneeIds(nextAssigneeIds)
-      setSaveState('saved')
-      saveStateResetTimerRef.current = window.setTimeout(() => {
-        setSaveState('idle')
-        saveStateResetTimerRef.current = null
-      }, 1400)
-    } else {
+      console.error('Failed to save task', taskError)
       setSaveState('error')
+      return
     }
+
+    if (currentUser?.id && persistAssignees) {
+      const addedAssigneeIds = nextAssigneeIds.filter((assigneeId) => !previousAssigneeIds.includes(assigneeId) && assigneeId !== currentUser.id)
+      if (addedAssigneeIds.length > 0) {
+        const notifications = addedAssigneeIds.map((recipientId) => ({
+          id: crypto.randomUUID(),
+          recipient_id: recipientId,
+          actor_id: currentUser.id,
+          task_id: taskId,
+          type: 'task' as const,
+          title: 'Task assigned to you',
+          message: `You were assigned "${next.title || previousTask?.title || 'a task'}".`,
+          metadata: { event: 'task_assigned', source: 'global_task_modal_assignment' },
+        }))
+        const { error: notificationsError } = await supabase.from('notifications').insert(notifications)
+        if (notificationsError) {
+          console.error('Failed to create assignment notifications from global task modal', notificationsError)
+        } else {
+          void dispatchNotificationEmails(
+            notifications.map((item) => ({
+              notificationId: item.id,
+              recipientId: item.recipient_id,
+              recipientEmail: members.find((member) => member.id === item.recipient_id)?.email ?? undefined,
+              type: 'task_assigned' as const,
+              taskId: item.task_id as string,
+              taskTitle: next.title || previousTask?.title || 'a task',
+              actorName: currentUser.name ?? currentUser.email ?? 'A teammate',
+            })),
+          )
+        }
+      }
+    }
+
+    setTask(next)
+    setAssigneeIds(nextAssigneeIds)
+    setSaveState('saved')
+    saveStateResetTimerRef.current = window.setTimeout(() => {
+      setSaveState('idle')
+      saveStateResetTimerRef.current = null
+    }, 1400)
   }
 
   const handleSubtaskCreated = (created: CreatedTaskPayload) => {
@@ -1240,8 +1251,14 @@ export function UniversalTaskDetailsModal() {
                     <p className='mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>Start Date</p>
                     <DatePicker
                       value={task.start_at ? new Date(task.start_at) : undefined}
-                      onChange={(date) => setTask((current) => (current ? { ...current, start_at: date ? date.toISOString() : null } : current))}
+                      onChange={(date) => {
+                        if (!task) return
+                        const nextTask = { ...task, start_at: date ? date.toISOString() : null }
+                        setTask(nextTask)
+                        void saveTask(nextTask, assigneeIds)
+                      }}
                       className='h-10'
+                      autoCommit
                       disabled={!canEdit}
                     />
                   </div>
@@ -1249,8 +1266,14 @@ export function UniversalTaskDetailsModal() {
                     <p className='mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>Due Date</p>
                     <DatePicker
                       value={task.due_at ? new Date(task.due_at) : undefined}
-                      onChange={(date) => setTask((current) => (current ? { ...current, due_at: date ? date.toISOString() : null } : current))}
+                      onChange={(date) => {
+                        if (!task) return
+                        const nextTask = { ...task, due_at: date ? date.toISOString() : null }
+                        setTask(nextTask)
+                        void saveTask(nextTask, assigneeIds)
+                      }}
                       className='h-10'
+                      autoCommit
                       disabled={!canEdit}
                     />
                   </div>
@@ -1294,19 +1317,18 @@ export function UniversalTaskDetailsModal() {
                     <p className='mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>Status</p>
                     <select
                       value={task.status_id ?? ''}
-                      onChange={(event) =>
-                        setTask((current) => {
-                          if (!current) return current
-                          const nextStatus = statusOptions.find((option) => option.id === event.target.value)
-                          return {
-                            ...current,
-                            status_id: nextStatus?.id ?? null,
-                            status: nextStatus?.key ?? current.status,
-                            board_column: legacyBoardColumnForStatusKey(nextStatus?.key),
-                          }
-                        })
-                      }
-                      onBlur={() => task && void saveTask(task, assigneeIds)}
+                      onChange={(event) => {
+                        if (!task) return
+                        const nextStatus = statusOptions.find((option) => option.id === event.target.value)
+                        const nextTask = {
+                          ...task,
+                          status_id: nextStatus?.id ?? null,
+                          status: nextStatus?.key ?? task.status,
+                          board_column: legacyBoardColumnForStatusKey(nextStatus?.key),
+                        }
+                        setTask(nextTask)
+                        void saveTask(nextTask, assigneeIds)
+                      }}
                       disabled={!canEdit}
                       className='h-10 w-full rounded-md bg-muted/40 px-3 text-sm shadow-[inset_0_0_0_1px_hsl(var(--foreground)/0.04)]'
                     >
@@ -1324,8 +1346,12 @@ export function UniversalTaskDetailsModal() {
                     <p className='mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>Priority</p>
                     <select
                       value={task.priority ?? 'low'}
-                      onChange={(event) => setTask((current) => (current ? { ...current, priority: event.target.value } : current))}
-                      onBlur={() => task && void saveTask(task, assigneeIds)}
+                      onChange={(event) => {
+                        if (!task) return
+                        const nextTask = { ...task, priority: event.target.value }
+                        setTask(nextTask)
+                        void saveTask(nextTask, assigneeIds)
+                      }}
                       disabled={!canEdit}
                       className='h-10 w-full rounded-md bg-muted/40 px-3 text-sm shadow-[inset_0_0_0_1px_hsl(var(--foreground)/0.04)]'
                     >

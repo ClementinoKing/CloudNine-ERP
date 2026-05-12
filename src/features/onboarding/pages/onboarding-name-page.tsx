@@ -51,7 +51,7 @@ async function resolveOrganizationIdForProfile(userId: string, onboardingOrganiz
 
 export function OnboardingNamePage() {
   const navigate = useNavigate()
-  const { currentUser, updateCurrentUser, updateOnboarding } = useAuth()
+  const { currentUser, updateCurrentUser, updateOnboarding, refreshCurrentUserProfile } = useAuth()
   const [fullName, setFullName] = useState(currentUser?.onboarding?.fullName || currentUser?.name || '')
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -128,6 +128,7 @@ export function OnboardingNamePage() {
     try {
       const upload = await uploadAvatarToR2(file)
       updateCurrentUser({ avatarUrl: upload.url, avatarPath: upload.key })
+      void refreshCurrentUserProfile({ avatarUrl: upload.url, avatarPath: upload.key })
     } catch (error) {
       setAvatarError(error instanceof Error ? error.message : 'Avatar upload failed.')
     } finally {

@@ -18,6 +18,7 @@ export function DatePicker({
   fromYear = 1950,
   toYear = 2100,
   withTime = true,
+  autoCommit = false,
 }: {
   value?: Date
   onChange: (date?: Date) => void
@@ -28,6 +29,7 @@ export function DatePicker({
   fromYear?: number
   toYear?: number
   withTime?: boolean
+  autoCommit?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [draftDate, setDraftDate] = useState<Date | undefined>(value)
@@ -44,6 +46,9 @@ export function DatePicker({
     const next = new Date(base)
     next.setHours(hours, minutes, 0, 0)
     setDraftDate(next)
+    if (autoCommit) {
+      onChange(next)
+    }
   }
 
   return (
@@ -91,9 +96,11 @@ export function DatePicker({
             const next = new Date(date)
             next.setHours(base.getHours(), base.getMinutes(), 0, 0)
             setDraftDate(next)
+            if (autoCommit || !withTime) {
+              onChange(next)
+            }
 
             if (!withTime) {
-              onChange(next)
               setOpen(false)
             }
           }}
@@ -123,16 +130,18 @@ export function DatePicker({
               >
                 Clear
               </Button>
-              <Button
-                type='button'
-                size='sm'
-                onClick={() => {
-                  onChange(selectedDate)
-                  setOpen(false)
-                }}
-              >
-                Apply
-              </Button>
+              {!autoCommit ? (
+                <Button
+                  type='button'
+                  size='sm'
+                  onClick={() => {
+                    onChange(selectedDate)
+                    setOpen(false)
+                  }}
+                >
+                  Apply
+                </Button>
+              ) : null}
             </div>
           </div>
         ) : null}

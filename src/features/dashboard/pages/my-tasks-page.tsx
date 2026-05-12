@@ -47,6 +47,7 @@ import { normalizeProjectColor } from '@/features/projects/lib/project-colors'
 import { dispatchNotificationEmails } from '@/features/notifications/lib/email-delivery'
 import { CreateTaskDialog, type CreatedTaskPayload } from '@/features/tasks/components/create-task-dialog'
 import { openTaskDetailsModal } from '@/features/tasks/lib/open-task-details-modal'
+import { reassignTaskAssignees } from '@/features/tasks/lib/task-assignment'
 import {
   legacyBoardColumnForStatusKey,
   mapStatusRowsToOptions,
@@ -686,6 +687,10 @@ function mapTaskPriorityToDatabasePriority(priority: TaskRow['priority']) {
     default:
       return 'low'
   }
+}
+
+function isPersistedStatusId(value?: string | null) {
+  return Boolean(value && !value.startsWith('fallback-'))
 }
 
 function createBoardId(name: string) {
@@ -1534,7 +1539,7 @@ export function MyTasksPage() {
           statusId: task.status_id ?? taskStatus?.id ?? undefined,
           statusKey: statusKey ?? undefined,
           priority: mapTaskPriority(task.priority),
-          boardColumn: task.status_id ?? task.board_column ?? undefined,
+          boardColumn: task.board_column ?? boardColumnIdFromStatus(statusLabelFromKey(statusKey ?? task.status)),
           recurrenceId: task.recurrence_id ?? undefined,
           projectId: task.project_id ?? '',
           projectName: projectMap.get(task.project_id ?? '') ?? 'Unassigned project',
@@ -1937,7 +1942,7 @@ export function MyTasksPage() {
           statusId: task.statusId ?? undefined,
           statusKey: task.statusKey ?? task.status ?? undefined,
           priority: mapTaskPriority(task.priority),
-          boardColumn: task.statusId ?? task.boardColumn ?? 'planned',
+          boardColumn: task.boardColumn ?? boardColumnIdFromStatus(mapTaskStatus(task.statusKey ?? task.status)),
           projectId: task.projectId,
           projectName: task.projectName,
           startDate: startDate.toISOString().slice(0, 10),
@@ -2076,11 +2081,12 @@ export function MyTasksPage() {
         const task = previousRows.find((row) => row.id === taskId)
         if (!task) return null
         const doneStatus = findStatusForProjectKey(task.projectId, doneStatusKey)
+        const doneStatusId = doneStatus?.id ?? null
         return supabase
           .from('tasks')
           .update({
             completed_at: completedAt,
-            status_id: doneStatus?.id ?? null,
+            status_id: isPersistedStatusId(doneStatusId) ? doneStatusId : null,
             status: doneStatus?.key ?? doneStatusKey,
             board_column: legacyBoardColumnForStatusKey(doneStatus?.key ?? doneStatusKey),
           })
@@ -2132,16 +2138,8 @@ export function MyTasksPage() {
     setBackgroundSync('syncing')
     const dedupeKey = `assign-bulk:${assigneeMember.id}:${selectedIds.sort().join(',')}`
     const result = await runWithDedup(dedupeKey, async () => {
-      const { error: taskError } = await supabase.from('tasks').update({ assigned_to: assigneeMember.id }).in('id', selectedIds)
-      if (taskError) return { error: taskError }
-
-      const { error: clearAssigneesError } = await supabase.from('task_assignees').delete().in('task_id', selectedIds)
-      if (clearAssigneesError) return { error: clearAssigneesError }
-
-      const { error: insertAssigneesError } = await supabase
-        .from('task_assignees')
-        .insert(selectedIds.map((taskId) => ({ task_id: taskId, assignee_id: assigneeMember.id })))
-      if (insertAssigneesError) return { error: insertAssigneesError }
+      const { error: assignmentError } = await reassignTaskAssignees(selectedIds, [assigneeMember.id])
+      if (assignmentError) return { error: assignmentError }
 
       if (currentUser?.id && assigneeMember.id !== currentUser.id) {
         const notifications = selectedIds.map((taskId) => {
@@ -2221,10 +2219,11 @@ export function MyTasksPage() {
         const task = previousRows.find((row) => row.id === taskId)
         if (!task) return null
         const resolvedStatus = findStatusForProjectKey(task.projectId, nextStatusKey)
+        const resolvedStatusId = resolvedStatus?.id ?? null
         return supabase
           .from('tasks')
           .update({
-            status_id: resolvedStatus?.id ?? null,
+            status_id: isPersistedStatusId(resolvedStatusId) ? resolvedStatusId : null,
             status: resolvedStatus?.key ?? nextStatusKey,
             board_column: legacyBoardColumnForStatusKey(resolvedStatus?.key ?? nextStatusKey),
           })
@@ -2333,6 +2332,7 @@ export function MyTasksPage() {
     const nextStatusLabel = destinationDefinition?.title ?? mapColumnIdToTaskStatus(toColumnId)
     const nextStatusKey = destinationDefinition?.key ?? mapTaskStatusToDatabaseStatus(nextStatusLabel)
     const resolvedStatus = findStatusForProjectKey(currentTask.projectId, nextStatusKey)
+    const resolvedStatusId = resolvedStatus?.id ?? null
     setTaskRows((rows) =>
       rows.map((task) =>
         task.id === taskId
@@ -2353,7 +2353,7 @@ export function MyTasksPage() {
       supabase
         .from('tasks')
         .update({
-          status_id: resolvedStatus?.id ?? null,
+          status_id: isPersistedStatusId(resolvedStatusId) ? resolvedStatusId : null,
           status: resolvedStatus?.key ?? nextStatusKey,
           board_column: legacyBoardColumnForStatusKey(resolvedStatus?.key ?? nextStatusKey),
         })
@@ -2494,7 +2494,7 @@ export function MyTasksPage() {
         return supabase
           .from('tasks')
           .update({
-            status_id: fallbackPlanned?.id ?? plannedDefinition?.id ?? null,
+            status_id: isPersistedStatusId(fallbackPlanned?.id ?? plannedDefinition?.id) ? (fallbackPlanned?.id ?? plannedDefinition?.id) : null,
             status: fallbackPlanned?.key ?? plannedDefinition?.key ?? 'planned',
             board_column: legacyBoardColumnForStatusKey(fallbackPlanned?.key ?? plannedDefinition?.key ?? 'planned'),
           })
@@ -2530,6 +2530,7 @@ export function MyTasksPage() {
     const doneStatus = findStatusForProjectKey(currentTask.projectId, 'done')
     const doneStatusKey = doneStatus?.key ?? 'done'
     const doneStatusLabel = doneStatus?.label ?? 'Done'
+    const doneStatusId = doneStatus?.id ?? null
     const previousRows = taskRows
     setTaskRows((rows) =>
       rows.map((task) =>
@@ -2553,7 +2554,7 @@ export function MyTasksPage() {
           completed_at: nextCompleted ? new Date().toISOString() : null,
           ...(nextCompleted
             ? {
-                status_id: doneStatus?.id ?? null,
+                status_id: isPersistedStatusId(doneStatusId) ? doneStatusId : null,
                 status: doneStatusKey,
                 board_column: legacyBoardColumnForStatusKey(doneStatusKey),
               }
@@ -2657,50 +2658,43 @@ export function MyTasksPage() {
       ),
     )
 
+    if (assigneesChanged) {
+      const { error: assignmentError } = await reassignTaskAssignees([taskId], nextAssigneeIds)
+      if (assignmentError) {
+        console.error('Failed to save task assignees', assignmentError)
+        setTaskRows(previousRows)
+        setBackgroundSync('error')
+        return { ok: false as const, nextBoardColumn: '' }
+      }
+    }
+
     const { error } = await supabase
       .from('tasks')
       .update({
         title,
         description: nextDescription,
-        status_id: nextStatusId,
+        status_id: isPersistedStatusId(nextStatusId) ? nextStatusId : null,
         status: nextStatusKey,
         priority: mapTaskPriorityToDatabasePriority(draft.priority),
         board_column: legacyBoardColumnForStatusKey(nextStatusKey),
         project_id: draft.projectId || null,
         start_at: startAtIso,
         due_at: dueAtIso,
-        assigned_to: nextAssigneeIds[0] ?? null,
         completed_at: draft.completed ? new Date().toISOString() : null,
       })
       .eq('id', taskId)
 
     if (error) {
       console.error('Failed to save task details', error)
+      if (assigneesChanged) {
+        const { error: revertError } = await reassignTaskAssignees([taskId], previousAssigneeIds)
+        if (revertError) {
+          console.error('Failed to restore task assignees after task save error', revertError)
+        }
+      }
       setTaskRows(previousRows)
       setBackgroundSync('error')
       return { ok: false as const, nextBoardColumn: '' }
-    }
-
-    if (assigneesChanged) {
-      const { error: clearError } = await supabase.from('task_assignees').delete().eq('task_id', taskId)
-      if (clearError) {
-        console.error('Failed to clear task assignees', clearError)
-        setTaskRows(previousRows)
-        setBackgroundSync('error')
-        return { ok: false as const, nextBoardColumn: '' }
-      }
-
-      if (nextAssigneeIds.length > 0) {
-        const { error: insertError } = await supabase
-          .from('task_assignees')
-          .insert(nextAssigneeIds.map((assigneeId) => ({ task_id: taskId, assignee_id: assigneeId })))
-        if (insertError) {
-          console.error('Failed to save task assignees', insertError)
-          setTaskRows(previousRows)
-          setBackgroundSync('error')
-          return { ok: false as const, nextBoardColumn: '' }
-        }
-      }
     }
 
       if (currentUser?.id) {

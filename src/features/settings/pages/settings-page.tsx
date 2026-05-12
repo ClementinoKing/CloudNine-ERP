@@ -4,7 +4,9 @@ import {
   BriefcaseBusiness,
   Building2,
   Camera,
+  ChevronDown,
   CircleUserRound,
+  CirclePlus,
   Flame,
   Mail,
   Medal,
@@ -24,6 +26,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useAuth } from '@/features/auth/context/auth-context'
 import { useOrganization } from '@/features/organization/context/organization-context'
 import { invokeAdminInvite } from '@/features/organization/lib/invitations'
@@ -57,6 +60,13 @@ const INVITE_DEPARTMENTS = [
   'Payroll & Regulatory Services',
   'Human Resources & Compliance',
   'Business Development & Client Services',
+] as const
+
+const ROLE_LABEL_OPTIONS = [
+  { value: 'member', label: 'Member' },
+  { value: 'viewer', label: 'Viewer' },
+  { value: 'admin', label: 'Admin' },
+  { value: 'owner', label: 'Owner' },
 ] as const
 
 const WEEKDAY_OPTIONS: Array<{ key: WeekdayKey; label: string }> = [
@@ -121,6 +131,156 @@ function normalizeAvailabilitySchedule(raw: unknown): AvailabilityBlock[] {
       return weekdays.has(item.day as WeekdayKey) && isValidTimeValue(item.startTime) && isValidTimeValue(item.endTime)
     })
     .map((item) => createAvailabilityBlock(item))
+}
+
+function DepartmentPopover({
+  value,
+  options,
+  onChange,
+  onAdd,
+  placeholder = 'Select department',
+}: {
+  value: string
+  options: string[]
+  onChange: (department: string) => void
+  onAdd: () => void
+  placeholder?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const filteredOptions = options.filter((department) => department.toLowerCase().includes(query.trim().toLowerCase()))
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button type='button' variant='outline' className='h-10 w-full justify-between px-3 font-normal'>
+          <span className={value ? 'text-foreground' : 'text-muted-foreground'}>{value || placeholder}</span>
+          <ChevronDown className='h-4 w-4 text-muted-foreground' />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className='w-[var(--radix-popover-trigger-width)] p-2' align='start'>
+        <div className='space-y-2'>
+          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder='Search departments' className='h-9' />
+          <div
+            className='max-h-44 overscroll-contain overflow-y-auto rounded-md border'
+            onWheel={(event) => event.stopPropagation()}
+            onTouchMove={(event) => event.stopPropagation()}
+          >
+            {filteredOptions.length === 0 ? (
+              <p className='px-3 py-2 text-xs text-muted-foreground'>No departments found.</p>
+            ) : (
+              filteredOptions.map((department) => (
+                <button
+                  key={department}
+                  type='button'
+                  className='block w-full border-b border-border/60 px-3 py-2 text-left text-sm transition-colors last:border-b-0 hover:bg-muted/40'
+                  onClick={() => {
+                    onChange(department)
+                    setOpen(false)
+                    setQuery('')
+                  }}
+                >
+                  {department}
+                </button>
+              ))
+            )}
+          </div>
+          <Button
+            type='button'
+            size='sm'
+            variant='outline'
+            className='w-full justify-center gap-1.5'
+            onClick={() => {
+              setOpen(false)
+              setQuery('')
+              onAdd()
+            }}
+          >
+            <CirclePlus className='h-4 w-4' />
+            Add department
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function JobPopover({
+  value,
+  department,
+  optionsByDepartment,
+  onChange,
+  onAdd,
+  placeholder = 'Select job title',
+}: {
+  value: string
+  department: string
+  optionsByDepartment: Record<string, string[]>
+  onChange: (jobTitle: string) => void
+  onAdd: () => void
+  placeholder?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const filteredOptions = department.trim() ? optionsByDepartment[department.trim()] ?? [] : []
+  const filteredByQuery = filteredOptions.filter((job) => job.toLowerCase().includes(query.trim().toLowerCase()))
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button type='button' variant='outline' className='h-10 w-full justify-between px-3 font-normal' disabled={!department.trim()}>
+          <span className={value ? 'text-foreground' : 'text-muted-foreground'}>
+            {value || (department.trim() ? placeholder : 'Select department first')}
+          </span>
+          <ChevronDown className='h-4 w-4 text-muted-foreground' />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className='w-[var(--radix-popover-trigger-width)] p-2' align='start'>
+        <div className='space-y-2'>
+          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder='Search jobs' className='h-9' />
+          <div
+            className='max-h-44 overscroll-contain overflow-y-auto rounded-md border'
+            onWheel={(event) => event.stopPropagation()}
+            onTouchMove={(event) => event.stopPropagation()}
+          >
+            {filteredByQuery.length === 0 ? (
+              <p className='px-3 py-2 text-xs text-muted-foreground'>No jobs found for this department.</p>
+            ) : (
+              filteredByQuery.map((job) => (
+                <button
+                  key={job}
+                  type='button'
+                  className='block w-full border-b border-border/60 px-3 py-2 text-left text-sm transition-colors last:border-b-0 hover:bg-muted/40'
+                  onClick={() => {
+                    onChange(job)
+                    setOpen(false)
+                    setQuery('')
+                  }}
+                >
+                  {job}
+                </button>
+              ))
+            )}
+          </div>
+          <Button
+            type='button'
+            size='sm'
+            variant='outline'
+            className='w-full justify-center gap-1.5'
+            onClick={() => {
+              setOpen(false)
+              setQuery('')
+              onAdd()
+            }}
+            disabled={!department.trim()}
+          >
+            <CirclePlus className='h-4 w-4' />
+            Add job
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
 }
 
 type InvitationItem = {
@@ -287,7 +447,7 @@ function isValidEmail(email: string) {
 }
 
 export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean }) {
-  const { currentUser, session, updateCurrentUser } = useAuth()
+  const { currentUser, session, updateCurrentUser, refreshCurrentUserProfile } = useAuth()
   const { currentOrganization } = useOrganization()
 
   const [activeTab, setActiveTab] = useState<SettingsTabKey>(profileOnly ? 'profile' : 'organization')
@@ -319,7 +479,10 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
   const [profileSaveMessage, setProfileSaveMessage] = useState<string | null>(null)
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [avatarError, setAvatarError] = useState<string | null>(null)
+  const [avatarCleared, setAvatarCleared] = useState(false)
   const [organizationProjects, setOrganizationProjects] = useState<Array<{ id: string; name: string }>>([])
+  const [organizationDepartments, setOrganizationDepartments] = useState<string[]>([])
+  const [organizationJobsByDepartment, setOrganizationJobsByDepartment] = useState<Record<string, string[]>>({})
   const [inviteEmailInput, setInviteEmailInput] = useState('')
   const [inviteFullName, setInviteFullName] = useState('')
   const [inviteJobTitle, setInviteJobTitle] = useState('')
@@ -341,6 +504,9 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
     setProfileEmail(currentUser?.email ?? 'user@example.com')
     setProfileAvatarUrl(currentUser?.avatarUrl)
     setProfileAvatarPath(currentUser?.avatarPath)
+    if (currentUser?.avatarUrl || currentUser?.avatarPath) {
+      setAvatarCleared(false)
+    }
   }, [currentUser?.avatarPath, currentUser?.avatarUrl, currentUser?.email, currentUser?.name])
 
   useEffect(() => {
@@ -354,8 +520,8 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
       if (cachedProfile) {
         setProfileName(cachedProfile.fullName)
         setProfileEmail(cachedProfile.email)
-        setProfileAvatarUrl(cachedProfile.avatarUrl)
-        setProfileAvatarPath(cachedProfile.avatarPath)
+        setProfileAvatarUrl(avatarCleared ? undefined : cachedProfile.avatarUrl)
+        setProfileAvatarPath(avatarCleared ? undefined : cachedProfile.avatarPath)
         setProfileJobTitle(cachedProfile.jobTitle)
         setProfileDepartment(cachedProfile.department)
         setProfileRoleLabel(cachedProfile.roleLabel)
@@ -382,7 +548,7 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
         setAdminInvitations(cachedInvites.invitations)
       }
     }
-  }, [invitesCacheKey, profileCacheKey, statsCacheKey])
+  }, [avatarCleared, invitesCacheKey, profileCacheKey, statsCacheKey])
 
   useEffect(() => {
     if (!currentUser?.id) return
@@ -399,10 +565,13 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
       .then(({ data, error }) => {
         if (cancelled || error || !data) return
 
+        const nextAvatarUrl = avatarCleared ? undefined : isDirectAvatarUrl(data.avatar_url) ? (data.avatar_url ?? undefined) : currentUser.avatarUrl
+        const nextAvatarPath = avatarCleared ? undefined : !isDirectAvatarUrl(data.avatar_url) ? (data.avatar_url ?? undefined) : currentUser.avatarPath
+
         setProfileName(data.full_name ?? currentUser.name ?? 'Organization User')
         setProfileEmail(data.email ?? currentUser.email ?? 'user@example.com')
-        setProfileAvatarUrl(isDirectAvatarUrl(data.avatar_url) ? (data.avatar_url ?? undefined) : currentUser.avatarUrl)
-        setProfileAvatarPath(!isDirectAvatarUrl(data.avatar_url) ? (data.avatar_url ?? undefined) : currentUser.avatarPath)
+        setProfileAvatarUrl(nextAvatarUrl)
+        setProfileAvatarPath(nextAvatarPath)
         setProfileJobTitle(data.job_title ?? '')
         setProfileDepartment(data.department ?? '')
         setProfileRoleLabel(data.role_label ?? '')
@@ -413,8 +582,8 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
           writeTimedCache(profileCacheKey, {
             fullName: data.full_name ?? currentUser.name ?? 'Organization User',
             email: data.email ?? currentUser.email ?? 'user@example.com',
-            avatarUrl: isDirectAvatarUrl(data.avatar_url) ? (data.avatar_url ?? undefined) : currentUser.avatarUrl,
-            avatarPath: !isDirectAvatarUrl(data.avatar_url) ? (data.avatar_url ?? undefined) : currentUser.avatarPath,
+            avatarUrl: nextAvatarUrl,
+            avatarPath: nextAvatarPath,
             jobTitle: data.job_title ?? '',
             department: data.department ?? '',
             roleLabel: data.role_label ?? '',
@@ -428,6 +597,68 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
       cancelled = true
     }
   }, [currentUser?.avatarPath, currentUser?.avatarUrl, currentUser?.email, currentUser?.id, currentUser?.name, profileCacheKey])
+
+  useEffect(() => {
+    if (!currentOrganization.id) {
+      setOrganizationDepartments([])
+      setOrganizationJobsByDepartment({})
+      return
+    }
+
+    let cancelled = false
+
+    const loadOrganizationProfileOptions = async () => {
+      const [{ data: departmentsData, error: departmentsError }, { data: jobsData, error: jobsError }] = await Promise.all([
+        supabase
+          .from('departments')
+          .select('id, name, is_active, archived_at')
+          .eq('organization_id', currentOrganization.id)
+          .order('name', { ascending: true }),
+        supabase
+          .from('jobs')
+          .select('id, department_id, name, is_active, archived_at')
+          .eq('organization_id', currentOrganization.id)
+          .order('name', { ascending: true }),
+      ])
+
+      if (cancelled) return
+      if (departmentsError || jobsError) return
+
+      const nextDepartments =
+        departmentsData
+          ?.filter((department) => department.is_active && !department.archived_at)
+          .map((department) => department.name.trim())
+          .filter((name) => name.length > 0) ?? []
+      setOrganizationDepartments(Array.from(new Set(nextDepartments)).sort((left, right) => left.localeCompare(right)))
+
+      const departmentNameById = new Map((departmentsData ?? []).map((department) => [department.id, department.name.trim()]))
+      const grouped: Record<string, string[]> = {}
+      for (const job of jobsData ?? []) {
+        if (!job.is_active || job.archived_at) continue
+        const departmentName = departmentNameById.get(job.department_id)?.trim()
+        const jobName = job.name.trim()
+        if (!departmentName || !jobName) continue
+
+        const existing = grouped[departmentName] ?? []
+        if (!existing.includes(jobName)) {
+          existing.push(jobName)
+        }
+        grouped[departmentName] = existing
+      }
+
+      for (const departmentName of Object.keys(grouped)) {
+        grouped[departmentName].sort((left, right) => left.localeCompare(right))
+      }
+
+      setOrganizationJobsByDepartment(grouped)
+    }
+
+    void loadOrganizationProfileOptions()
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentOrganization.id])
 
   useEffect(() => {
     if (!currentUser?.id) return
@@ -665,11 +896,13 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
 
     setUploadingAvatar(true)
     setAvatarError(null)
+    setAvatarCleared(false)
     try {
       const upload = await uploadAvatarToR2(file)
       setProfileAvatarUrl(upload.url)
       setProfileAvatarPath(upload.key)
       updateCurrentUser({ avatarUrl: upload.url, avatarPath: upload.key })
+      void refreshCurrentUserProfile({ avatarUrl: upload.url, avatarPath: upload.key })
     } catch (error) {
       setAvatarError(error instanceof Error ? error.message : 'Avatar upload failed.')
     } finally {
@@ -679,10 +912,24 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
   }
 
   const handleRemoveAvatar = () => {
+    setAvatarCleared(true)
     setProfileAvatarUrl(undefined)
     setProfileAvatarPath(undefined)
     setAvatarError(null)
     updateCurrentUser({ avatarUrl: undefined, avatarPath: undefined })
+    if (profileCacheKey) {
+      writeTimedCache(profileCacheKey, {
+        fullName: profileName.trim() || 'Organization User',
+        email: profileEmail.trim() || currentUser?.email || 'user@example.com',
+        avatarUrl: undefined,
+        avatarPath: undefined,
+        jobTitle: profileJobTitle.trim(),
+        department: profileDepartment.trim(),
+        roleLabel: profileRoleLabel.trim(),
+        aboutMe: profileAboutMe.trim(),
+        availabilitySchedule,
+      } satisfies Omit<SettingsProfileCachePayload, 'cachedAt'>)
+    }
   }
 
   const handleSaveProfile = async () => {
@@ -734,6 +981,7 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
       avatarUrl: profileAvatarUrl,
       avatarPath: profileAvatarPath,
     })
+    setAvatarCleared(false)
     if (profileCacheKey) {
       writeTimedCache(profileCacheKey, {
         fullName: profileName.trim() || 'Organization User',
@@ -750,6 +998,11 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
     setProfileSaveMessage('Profile updated.')
     setSavingProfile(false)
   }
+
+  const profileDepartmentOptions = [
+    ...(profileDepartment.trim() && !organizationDepartments.includes(profileDepartment.trim()) ? [profileDepartment.trim()] : []),
+    ...organizationDepartments,
+  ]
 
   const addAvailabilityBlock = () => {
     setAvailabilitySchedule((current) => [...current, createAvailabilityBlock()])
@@ -1048,38 +1301,50 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
                 <Input type='email' value={profileEmail} readOnly disabled className='cursor-not-allowed opacity-70' />
               </div>
               <div className='space-y-2'>
-                <label className='text-sm font-medium text-foreground'>Job Title</label>
-                <select
-                  value={profileJobTitle}
-                  onChange={(event) => setProfileJobTitle(event.target.value)}
-                  className='h-10 w-full rounded-md border border-input bg-background px-3 text-sm'
-                >
-                  <option value=''>Select job title</option>
-                  {INVITE_JOB_TITLES.map((title) => (
-                    <option key={title} value={title}>
-                      {title}
-                    </option>
-                  ))}
-                </select>
+                <label className='text-sm font-medium text-foreground'>Department</label>
+                <DepartmentPopover
+                  value={profileDepartment}
+                  options={profileDepartmentOptions}
+                  onChange={(department) => {
+                    setProfileDepartment(department)
+                    setProfileJobTitle('')
+                  }}
+                  onAdd={() => window.dispatchEvent(new CustomEvent('cloudnine:open-create-department'))}
+                />
               </div>
               <div className='space-y-2'>
-                <label className='text-sm font-medium text-foreground'>Department</label>
-                <select
-                  value={profileDepartment}
-                  onChange={(event) => setProfileDepartment(event.target.value)}
-                  className='h-10 w-full rounded-md border border-input bg-background px-3 text-sm'
-                >
-                  <option value=''>Select department</option>
-                  {INVITE_DEPARTMENTS.map((department) => (
-                    <option key={department} value={department}>
-                      {department}
-                    </option>
-                  ))}
-                </select>
+                <label className='text-sm font-medium text-foreground'>Job Title</label>
+                <JobPopover
+                  value={profileJobTitle}
+                  department={profileDepartment}
+                  optionsByDepartment={organizationJobsByDepartment}
+                  onChange={setProfileJobTitle}
+                  onAdd={() =>
+                    window.dispatchEvent(
+                      new CustomEvent('cloudnine:open-create-job', {
+                        detail: profileDepartment ? { departmentName: profileDepartment } : undefined,
+                      }),
+                    )
+                  }
+                />
               </div>
               <div className='space-y-2'>
                 <label className='text-sm font-medium text-foreground'>Role</label>
-                <Input value={profileRoleLabel} onChange={(event) => setProfileRoleLabel(event.target.value)} />
+                <select
+                  value={profileRoleLabel}
+                  onChange={(event) => setProfileRoleLabel(event.target.value)}
+                  className='h-10 w-full rounded-md border border-input bg-background px-3 text-sm'
+                >
+                  <option value=''>Select role label</option>
+                  {ROLE_LABEL_OPTIONS.map((role) => (
+                    <option key={role.value} value={role.value}>
+                      {role.label}
+                    </option>
+                  ))}
+                  {profileRoleLabel.trim() && !ROLE_LABEL_OPTIONS.some((role) => role.value === profileRoleLabel) ? (
+                    <option value={profileRoleLabel}>{profileRoleLabel}</option>
+                  ) : null}
+                </select>
               </div>
               <div className='space-y-2 md:col-span-2'>
                 <label className='text-sm font-medium text-foreground'>About Me</label>

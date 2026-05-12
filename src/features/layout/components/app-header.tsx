@@ -49,12 +49,23 @@ import { openTaskDetailsModal } from '@/features/tasks/lib/open-task-details-mod
 import { useOrganization } from '@/features/organization/context/organization-context'
 import { DEFAULT_PROJECT_COLOR, PROJECT_COLOR_OPTIONS, normalizeProjectColor, projectDotStyle } from '@/features/projects/lib/project-colors'
 import { supabase } from '@/lib/supabase'
+import { notify } from '@/lib/notify'
 import { cn } from '@/lib/utils'
 
 import { AccountMenu } from './account-menu'
 import { InvitePeopleDialog } from './invite-people-dialog'
 
 type ProjectOwnerOption = {
+  id: string
+  name: string
+}
+
+type CreateOrgModalEventDetail = {
+  departmentId?: string
+  departmentName?: string
+}
+
+type DepartmentOption = {
   id: string
   name: string
 }
@@ -318,6 +329,8 @@ export function AppHeader({
   const [createTaskOpen, setCreateTaskOpen] = useState(false)
   const [createProjectOpen, setCreateProjectOpen] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
+  const [createDepartmentOpen, setCreateDepartmentOpen] = useState(false)
+  const [createJobOpen, setCreateJobOpen] = useState(false)
 
   const [projectName, setProjectName] = useState('')
   const [projectColor, setProjectColor] = useState(DEFAULT_PROJECT_COLOR)
@@ -328,6 +341,12 @@ export function AppHeader({
   const [projectOwners, setProjectOwners] = useState<ProjectOwnerOption[]>([])
   const [projectSubmitError, setProjectSubmitError] = useState<string | null>(null)
   const [projectSubmitting, setProjectSubmitting] = useState(false)
+  const [departmentName, setDepartmentName] = useState('')
+  const [departmentSubmitting, setDepartmentSubmitting] = useState(false)
+  const [jobDepartments, setJobDepartments] = useState<DepartmentOption[]>([])
+  const [jobName, setJobName] = useState('')
+  const [jobDepartmentId, setJobDepartmentId] = useState('')
+  const [jobSubmitting, setJobSubmitting] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [notificationsLoading, setNotificationsLoading] = useState(false)
   const [notificationItems, setNotificationItems] = useState<HeaderNotificationItem[]>([])
@@ -538,9 +557,58 @@ export function AppHeader({
     setCreateProjectOpen(true)
   }, [currentUser?.id])
 
+  const resetDepartmentFlow = useCallback(() => {
+    setDepartmentName('')
+    setDepartmentSubmitting(false)
+  }, [])
+
+  const resetJobFlow = useCallback(() => {
+    setJobDepartments([])
+    setJobName('')
+    setJobDepartmentId('')
+    setJobSubmitting(false)
+  }, [])
+
   useEffect(() => {
     resetProjectFlow()
   }, [currentOrganizationId])
+
+  useEffect(() => {
+    if (!createDepartmentOpen) return
+    setDepartmentName('')
+  }, [createDepartmentOpen])
+
+  useEffect(() => {
+    if (!createJobOpen) {
+      resetJobFlow()
+      return
+    }
+
+    if (!currentOrganizationId) return
+
+    let cancelled = false
+
+    void supabase
+      .from('departments')
+      .select('id, name')
+      .eq('organization_id', currentOrganizationId)
+      .eq('is_active', true)
+      .is('archived_at', null)
+      .order('name', { ascending: true })
+      .then(({ data, error }) => {
+        if (cancelled) return
+        if (error) {
+          console.error('Failed to load job modal departments', error)
+          return
+        }
+        const departments = (data ?? []) as DepartmentOption[]
+        setJobDepartments(departments)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [createJobOpen, currentOrganizationId, resetJobFlow])
 
   const handleProjectModalChange = (open: boolean) => {
     if (!open) {
@@ -626,15 +694,49 @@ export function AppHeader({
   useEffect(() => {
     const handleOpenCreateTask = () => setCreateTaskOpen(true)
     const handleOpenInvitePeople = () => setInviteOpen(true)
+    const handleOpenCreateDepartment = () => {
+      resetDepartmentFlow()
+      setCreateDepartmentOpen(true)
+    }
+    const handleOpenCreateJob = (event: Event) => {
+      const detail = (event as CustomEvent<CreateOrgModalEventDetail>).detail
+      resetJobFlow()
+      if (detail?.departmentName) {
+        void supabase
+          .from('departments')
+          .select('id, name')
+          .eq('organization_id', currentOrganizationId)
+          .eq('is_active', true)
+          .is('archived_at', null)
+          .eq('name', detail.departmentName)
+          .maybeSingle()
+          .then(({ data, error }) => {
+            if (error) {
+              console.error('Failed to prefill job modal department', error)
+              return
+            }
+            if (data?.id) {
+              setJobDepartmentId(data.id)
+            }
+          })
+      } else if (detail?.departmentId) {
+        setJobDepartmentId(detail.departmentId)
+      }
+      setCreateJobOpen(true)
+    }
 
     window.addEventListener('cloudnine:open-create-task', handleOpenCreateTask as EventListener)
     window.addEventListener('cloudnine:open-invite-people', handleOpenInvitePeople as EventListener)
+    window.addEventListener('cloudnine:open-create-department', handleOpenCreateDepartment as EventListener)
+    window.addEventListener('cloudnine:open-create-job', handleOpenCreateJob as EventListener)
 
     return () => {
       window.removeEventListener('cloudnine:open-create-task', handleOpenCreateTask as EventListener)
       window.removeEventListener('cloudnine:open-invite-people', handleOpenInvitePeople as EventListener)
+      window.removeEventListener('cloudnine:open-create-department', handleOpenCreateDepartment as EventListener)
+      window.removeEventListener('cloudnine:open-create-job', handleOpenCreateJob as EventListener)
     }
-  }, [])
+  }, [currentOrganizationId, resetDepartmentFlow, resetJobFlow])
 
   useEffect(() => {
     const onRealtimeChange = (event: Event) => {
@@ -756,6 +858,97 @@ export function AppHeader({
       },
     ],
     [closeSearch, navigate, openCreateProjectModal],
+  )
+
+  const handleCreateDepartment = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      const name = departmentName.trim()
+      if (!name) {
+        notify.error('Department name is required')
+        return
+      }
+      if (!currentOrganizationId) {
+        notify.error('Select an organization first')
+        return
+      }
+
+      setDepartmentSubmitting(true)
+      try {
+        const { data, error } = await supabase
+          .from('departments')
+          .insert({
+            organization_id: currentOrganizationId,
+            name,
+            created_by: currentUser?.id ?? null,
+            is_active: true,
+          })
+          .select('id, name')
+          .maybeSingle()
+
+        if (error) throw error
+        if (!data) throw new Error('Department was not created.')
+
+        notify.success('Department created', { description: `${name} is now available for this organization.` })
+        setCreateDepartmentOpen(false)
+        resetDepartmentFlow()
+        window.dispatchEvent(new CustomEvent('cloudnine:realtime-change', { detail: { table: 'departments' } }))
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to create department.'
+        notify.error('Unable to create department', { description: message })
+      } finally {
+        setDepartmentSubmitting(false)
+      }
+    },
+    [currentOrganizationId, currentUser?.id, departmentName, resetDepartmentFlow],
+  )
+
+  const handleCreateJob = useCallback(
+    async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      const name = jobName.trim()
+      if (!name) {
+        notify.error('Job name is required')
+        return
+      }
+      if (!jobDepartmentId) {
+        notify.error('Select a department for this job')
+        return
+      }
+      if (!currentOrganizationId) {
+        notify.error('Select an organization first')
+        return
+      }
+
+      setJobSubmitting(true)
+      try {
+        const { data, error } = await supabase
+          .from('jobs')
+          .insert({
+            organization_id: currentOrganizationId,
+            department_id: jobDepartmentId,
+            name,
+            created_by: currentUser?.id ?? null,
+            is_active: true,
+          })
+          .select('id, name')
+          .maybeSingle()
+
+        if (error) throw error
+        if (!data) throw new Error('Job was not created.')
+
+        notify.success('Job created', { description: `${name} has been added.` })
+        setCreateJobOpen(false)
+        resetJobFlow()
+        window.dispatchEvent(new CustomEvent('cloudnine:realtime-change', { detail: { table: 'jobs' } }))
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to create job.'
+        notify.error('Unable to create job', { description: message })
+      } finally {
+        setJobSubmitting(false)
+      }
+    },
+    [currentOrganizationId, currentUser?.id, jobDepartmentId, jobName, resetJobFlow],
   )
 
   const searchSections = useMemo(() => {
@@ -1437,6 +1630,91 @@ export function AppHeader({
               </DialogFooter>
             </form>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={createDepartmentOpen}
+        onOpenChange={(open) => {
+          setCreateDepartmentOpen(open)
+          if (!open) resetDepartmentFlow()
+        }}
+      >
+        <DialogContent className='max-w-md'>
+          <DialogHeader>
+            <DialogTitle>Create department</DialogTitle>
+            <DialogDescription>Add a department for the current organization.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCreateDepartment} className='space-y-5'>
+            <div className='space-y-2'>
+              <label className='text-sm font-medium text-foreground'>Department name</label>
+              <Input
+                value={departmentName}
+                onChange={(event) => setDepartmentName(event.target.value)}
+                placeholder='e.g. Finance'
+                disabled={departmentSubmitting}
+                autoFocus
+              />
+            </div>
+            <DialogFooter>
+              <Button type='button' variant='outline' onClick={() => setCreateDepartmentOpen(false)} disabled={departmentSubmitting}>
+                Cancel
+              </Button>
+              <Button type='submit' disabled={departmentSubmitting || !departmentName.trim()}>
+                {departmentSubmitting ? 'Creating...' : 'Create'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={createJobOpen}
+        onOpenChange={(open) => {
+          setCreateJobOpen(open)
+          if (!open) resetJobFlow()
+        }}
+      >
+        <DialogContent className='max-w-md'>
+          <DialogHeader>
+            <DialogTitle>Create job</DialogTitle>
+            <DialogDescription>Add a job linked to a department.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCreateJob} className='space-y-5'>
+            <div className='space-y-2'>
+              <label className='text-sm font-medium text-foreground'>Department</label>
+              <select
+                value={jobDepartmentId}
+                onChange={(event) => setJobDepartmentId(event.target.value)}
+                className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                disabled={jobSubmitting}
+              >
+                <option value=''>Select department</option>
+                {jobDepartments.map((department) => (
+                  <option key={department.id} value={department.id}>
+                    {department.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className='space-y-2'>
+              <label className='text-sm font-medium text-foreground'>Job name</label>
+              <Input
+                value={jobName}
+                onChange={(event) => setJobName(event.target.value)}
+                placeholder='e.g. Operations Lead'
+                disabled={jobSubmitting}
+              />
+            </div>
+            <DialogFooter>
+              <Button type='button' variant='outline' onClick={() => setCreateJobOpen(false)} disabled={jobSubmitting}>
+                Cancel
+              </Button>
+              <Button type='submit' disabled={jobSubmitting || !jobName.trim() || !jobDepartmentId}>
+                {jobSubmitting ? 'Creating...' : 'Create'}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 

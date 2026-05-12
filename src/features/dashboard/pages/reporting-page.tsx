@@ -1,5 +1,5 @@
 import { AlertTriangle, CalendarClock, CheckCircle2, Clock3, RefreshCw, Search, SlidersHorizontal, TrendingUp } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -51,6 +51,10 @@ type GoalRow = {
 type GoalLinkRow = {
   goal_id: string
   project_id: string | null
+}
+
+type GoalLinkQueryRow = GoalLinkRow & {
+  goals: { id: string; organization_id: string } | null
 }
 
 type GoalCheckinRow = {
@@ -169,10 +173,15 @@ type ReportingCachePayload = {
 
 const REPORTING_CACHE_KEY = 'cloudnine.reporting.page.v1'
 const REPORTING_CACHE_TTL_MS = 3 * 60 * 1000
+const REPORTING_MIN_INITIAL_LOADING_MS = 450
 
-function readReportingCache(): ReportingCachePayload | null {
+function getReportingCacheKey(organizationId: string) {
+  return `${REPORTING_CACHE_KEY}:${organizationId}`
+}
+
+function readReportingCache(organizationId: string): ReportingCachePayload | null {
   try {
-    const raw = localStorage.getItem(REPORTING_CACHE_KEY)
+    const raw = localStorage.getItem(getReportingCacheKey(organizationId))
     if (!raw) return null
     const parsed = JSON.parse(raw) as ReportingCachePayload
     if (!parsed || typeof parsed.cachedAt !== 'number') return null
@@ -186,14 +195,30 @@ function readReportingCache(): ReportingCachePayload | null {
   }
 }
 
-function writeReportingCache(payload: Omit<ReportingCachePayload, 'cachedAt'>) {
+function writeReportingCache(organizationId: string, payload: Omit<ReportingCachePayload, 'cachedAt'>) {
   localStorage.setItem(
-    REPORTING_CACHE_KEY,
+    getReportingCacheKey(organizationId),
     JSON.stringify({
       cachedAt: Date.now(),
       ...payload,
     } satisfies ReportingCachePayload),
   )
+}
+
+function useCurrentTime(intervalMs = 60_000) {
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNow(Date.now())
+    }, intervalMs)
+
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [intervalMs])
+
+  return now
 }
 
 function safeNumber(value: unknown, fallback = 0) {
@@ -428,15 +453,16 @@ function ReportingPageSkeleton() {
 }
 
 export function ReportingPage() {
-  const { currentOrganizationId } = useOrganization()
-  const cached = readReportingCache()
-  const [tasks, setTasks] = useState<ReportingTaskRow[]>(cached?.tasks ?? [])
-  const [goals, setGoals] = useState<GoalRow[]>(cached?.goals ?? [])
-  const [goalLinks, setGoalLinks] = useState<GoalLinkRow[]>(cached?.goalLinks ?? [])
-  const [checkins, setCheckins] = useState<GoalCheckinRow[]>(cached?.checkins ?? [])
-  const [profiles, setProfiles] = useState<ProfileRow[]>(cached?.profiles ?? [])
-  const [projects, setProjects] = useState<ProjectRow[]>(cached?.projects ?? [])
-  const [loading, setLoading] = useState(() => !cached)
+  const { currentOrganizationId, loading: organizationLoading } = useOrganization()
+  const previousOrganizationIdRef = useRef<string | null>(null)
+  const now = useCurrentTime()
+  const [tasks, setTasks] = useState<ReportingTaskRow[]>([])
+  const [goals, setGoals] = useState<GoalRow[]>([])
+  const [goalLinks, setGoalLinks] = useState<GoalLinkRow[]>([])
+  const [checkins, setCheckins] = useState<GoalCheckinRow[]>([])
+  const [profiles, setProfiles] = useState<ProfileRow[]>([])
+  const [projects, setProjects] = useState<ProjectRow[]>([])
+  const [loading, setLoading] = useState(true)
   const [refreshKey, setRefreshKey] = useState(0)
 
   const [filters, setFilters] = useState<ReportingFilters>({
@@ -458,7 +484,28 @@ export function ReportingPage() {
   const [rpcActions, setRpcActions] = useState<ReportingActionPanels | null>(null)
 
   useEffect(() => {
+    if (organizationLoading || !currentOrganizationId) {
+      // Keep the skeleton visible until the organization context is resolved.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLoading(true)
+      return
+    }
+
     let cancelled = false
+    const startedAt = Date.now()
+    const cached = readReportingCache(currentOrganizationId)
+    const orgStateChanged = previousOrganizationIdRef.current !== currentOrganizationId
+    previousOrganizationIdRef.current = currentOrganizationId
+
+    if (orgStateChanged) {
+      setTasks([])
+      setGoals([])
+      setGoalLinks([])
+      setCheckins([])
+      setProfiles([])
+      setProjects([])
+    }
+
     setLoading(true)
 
     void Promise.all([
@@ -469,18 +516,23 @@ export function ReportingPage() {
         )
         .eq('organization_id', currentOrganizationId),
       supabase.from('goals').select('id,title,cycle,health,owner_id,department,due_at,updated_at').eq('organization_id', currentOrganizationId),
-      supabase.from('goal_links').select('goal_id,project_id').eq('organization_id', currentOrganizationId),
+      supabase.from('goal_links').select('goal_id,project_id,goals!inner(id,organization_id)').eq('goals.organization_id', currentOrganizationId),
       supabase.from('goal_checkins').select('id,goal_id,author_id,created_at,blockers,next_actions').order('created_at', { ascending: false }).limit(80),
       supabase.from('profiles').select('id,full_name,department').eq('organization_id', currentOrganizationId).order('full_name', { ascending: true }),
       supabase.from('projects').select('id,name,color').eq('organization_id', currentOrganizationId).order('name', { ascending: true }),
     ]).then(([tasksResult, goalsResult, linksResult, checkinsResult, profilesResult, projectsResult]) => {
       if (cancelled) return
-      const nextTasks = (tasksResult.data as ReportingTaskRow[] | null) ?? []
-      const nextGoals = (goalsResult.data as GoalRow[] | null) ?? []
-      const nextGoalLinks = (linksResult.data as GoalLinkRow[] | null) ?? []
-      const nextCheckins = (checkinsResult.data as GoalCheckinRow[] | null) ?? []
-      const nextProfiles = (profilesResult.data as ProfileRow[] | null) ?? []
-      const nextProjects = (projectsResult.data as ProjectRow[] | null) ?? []
+      const nextTasks = tasksResult.error ? cached?.tasks ?? [] : ((tasksResult.data as ReportingTaskRow[] | null) ?? [])
+      const nextGoals = goalsResult.error ? cached?.goals ?? [] : ((goalsResult.data as GoalRow[] | null) ?? [])
+      const nextGoalLinks = linksResult.error
+        ? cached?.goalLinks ?? []
+        : ((linksResult.data as GoalLinkQueryRow[] | null) ?? []).map(({ goal_id, project_id }) => ({
+            goal_id,
+            project_id,
+          }))
+      const nextCheckins = checkinsResult.error ? cached?.checkins ?? [] : ((checkinsResult.data as GoalCheckinRow[] | null) ?? [])
+      const nextProfiles = profilesResult.error ? cached?.profiles ?? [] : ((profilesResult.data as ProfileRow[] | null) ?? [])
+      const nextProjects = projectsResult.error ? cached?.projects ?? [] : ((projectsResult.data as ProjectRow[] | null) ?? [])
 
       setTasks(nextTasks)
       setGoals(nextGoals)
@@ -488,7 +540,7 @@ export function ReportingPage() {
       setCheckins(nextCheckins)
       setProfiles(nextProfiles)
       setProjects(nextProjects)
-      writeReportingCache({
+      writeReportingCache(currentOrganizationId, {
         tasks: nextTasks,
         goals: nextGoals,
         goalLinks: nextGoalLinks,
@@ -496,17 +548,23 @@ export function ReportingPage() {
         profiles: nextProfiles,
         projects: nextProjects,
       })
-      setLoading(false)
+      const elapsed = Date.now() - startedAt
+      const remaining = Math.max(REPORTING_MIN_INITIAL_LOADING_MS - elapsed, 0)
+      window.setTimeout(() => {
+        if (!cancelled) setLoading(false)
+      }, remaining)
     })
 
     return () => {
       cancelled = true
     }
-  }, [currentOrganizationId, refreshKey])
+  }, [currentOrganizationId, organizationLoading, refreshKey])
 
   useEffect(() => {
-    if (!rpcSupported) return
+    if (organizationLoading || !currentOrganizationId || !rpcSupported) return
     let cancelled = false
+    // RPC status participates in the visible loading affordance on this page.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRpcLoading(true)
 
     const params = {
@@ -553,7 +611,7 @@ export function ReportingPage() {
     return () => {
       cancelled = true
     }
-  }, [currentOrganizationId, filters, rpcSupported, refreshKey])
+  }, [currentOrganizationId, filters, organizationLoading, rpcSupported, refreshKey])
 
   const profileById = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles])
 
@@ -723,7 +781,6 @@ export function ReportingPage() {
   }, [scopedTasks])
 
   const fallbackActions = useMemo<ReportingActionPanels>(() => {
-    const now = Date.now()
     const overdueMap = new Map<string, OverdueOwnerRow>()
     for (const task of scopedTasks) {
       const dueAt = parseDate(task.due_at)
@@ -813,7 +870,7 @@ export function ReportingPage() {
       .slice(0, 10)
 
     return { overdueByOwner, atRiskGoals, recentChanges }
-  }, [checkins, filters, goalLinks, goals, profileById, scopedTasks])
+  }, [checkins, filters, goalLinks, goals, now, profileById, scopedTasks])
 
   const effectiveKpis = useMemo<KpiMetrics>(() => {
     if (!rpcKpis) return fallbackKpis
@@ -855,7 +912,6 @@ export function ReportingPage() {
   const activeDatasetName = rpcKpis && rpcTrend.length > 0 && rpcStatusMix.length > 0 && rpcActions ? 'Live aggregates' : 'Local calculations'
 
   const overdueDetailsByOwner = useMemo(() => {
-    const now = Date.now()
     const byOwner = new Map<string, Array<{ id: string; title: string; projectName: string; dueAt: string | null; statusLabel: string }>>()
     for (const task of baseFilteredTasks) {
       const dueAt = parseDate(task.due_at)
@@ -878,7 +934,7 @@ export function ReportingPage() {
       byOwner.set(key, sorted)
     }
     return byOwner
-  }, [baseFilteredTasks])
+  }, [baseFilteredTasks, now])
 
   const atRiskInsightsByGoal = useMemo(() => {
     const projectLinksByGoal = new Map<string, Set<string>>()

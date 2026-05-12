@@ -133,21 +133,57 @@ async function uploadFileToR2<T>(
         : uploadKind === 'chatVoice'
         ? 'r2-chat-voice-messages'
           : uploadKind === 'document'
-            ? 'r2-documents'
+        ? 'r2-documents'
             : 'r2-avatar')
   const headers = await getAuthHeaders(accessToken)
-  const performRequest = async (requestHeaders: Record<string, string>) =>
-    new Promise<T>((resolve, reject) => {
+  const requestSignedUpload = async (requestHeaders: Record<string, string>) => {
+    const signedUrlHeaders = {
+      ...requestHeaders,
+      'x-file-name': encodeURIComponent(file.name),
+      'x-content-type': file.type || fallbackType,
+      'x-upload-kind': uploadKind,
+    }
+
+    let response: Response
+
+    try {
+      response = await fetch(getFunctionsBaseUrl(functionName), {
+        method: 'POST',
+        headers: signedUrlHeaders,
+      })
+    } catch {
+      throw new Error(networkErrorMessage('upload', uploadKind))
+    }
+
+    const raw = await response.text()
+    let payload: (T & { error?: string; uploadUrl?: string }) | null = null
+
+    try {
+      payload = raw ? (JSON.parse(raw) as T & { error?: string; uploadUrl?: string }) : null
+    } catch {
+      payload = null
+    }
+
+    if (!response.ok) {
+      throw new Error(payload?.error || raw || `${uploadKind} upload failed.`)
+    }
+
+    if (!payload?.uploadUrl) {
+      throw new Error(`${uploadKind} upload failed.`)
+    }
+
+    return payload as T & { uploadUrl: string }
+  }
+
+  const putFileToSignedUrl = (uploadUrl: string, requestHeaders: Record<string, string>) =>
+    new Promise<void>((resolve, reject) => {
       const xhr = new XMLHttpRequest()
-      xhr.open('POST', getFunctionsBaseUrl(functionName))
+      xhr.open('PUT', uploadUrl)
+      xhr.timeout = 120000
 
       for (const [key, value] of Object.entries(requestHeaders)) {
         xhr.setRequestHeader(key, value)
       }
-
-      xhr.setRequestHeader('x-file-name', encodeURIComponent(file.name))
-      xhr.setRequestHeader('x-content-type', file.type || fallbackType)
-      xhr.setRequestHeader('x-upload-kind', uploadKind)
 
       xhr.upload.onprogress = (event) => {
         if (!onProgress) return
@@ -162,34 +198,31 @@ async function uploadFileToR2<T>(
         reject(new Error(networkErrorMessage('upload', uploadKind)))
       }
 
+      xhr.ontimeout = () => {
+        reject(new Error(`${networkErrorMessage('upload', uploadKind)} The upload timed out.`))
+      }
+
       xhr.onload = () => {
-        const raw = xhr.responseText || ''
-        let payload: (T & { error?: string }) | null = null
-
-        try {
-          payload = raw ? (JSON.parse(raw) as T & { error?: string }) : null
-        } catch {
-          payload = null
-        }
-
         if (xhr.status < 200 || xhr.status >= 300) {
-          reject(new Error(payload?.error || xhr.statusText || `${uploadKind} upload failed.`))
+          reject(new Error(xhr.responseText || xhr.statusText || `${uploadKind} upload failed.`))
           return
         }
 
-        if (!payload) {
-          reject(new Error(`${uploadKind} upload failed.`))
-          return
-        }
-
-        resolve(payload)
+        resolve()
       }
 
       xhr.send(file)
     })
 
   try {
-    return await performRequest(headers)
+    const signedUpload = await requestSignedUpload(headers)
+    await putFileToSignedUrl(
+      signedUpload.uploadUrl,
+      {
+        'Content-Type': file.type || fallbackType,
+      },
+    )
+    return signedUpload
   } catch (error) {
     const shouldRetry =
       error instanceof Error &&
@@ -200,7 +233,11 @@ async function uploadFileToR2<T>(
     }
 
     const retryHeaders = await getAuthHeaders(null)
-    return await performRequest(retryHeaders)
+    const signedUpload = await requestSignedUpload(retryHeaders)
+    await putFileToSignedUrl(signedUpload.uploadUrl, {
+      'Content-Type': file.type || fallbackType,
+    })
+    return signedUpload
   }
 }
 

@@ -15,6 +15,7 @@ const accessKeyId = Deno.env.get('R2_ACCESS_KEY_ID')
 const secretAccessKey = Deno.env.get('R2_SECRET_ACCESS_KEY')
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!
 const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!
+const endpointAccountId = endpoint ? new URL(endpoint).hostname.split('.')[0] : null
 
 function getS3Client() {
   if (!endpoint || !accessKeyId || !secretAccessKey) {
@@ -24,6 +25,8 @@ function getS3Client() {
   return new S3Client({
     region: 'auto',
     endpoint,
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
     credentials: {
       accessKeyId,
       secretAccessKey,
@@ -126,6 +129,21 @@ Deno.serve(async (req) => {
     return json({ error: 'R2 credentials are missing for the r2-chat-attachments function.' }, 500)
   }
 
+  if (endpointAccountId && accessKeyId && accessKeyId === endpointAccountId) {
+    log('error', 'r2_invalid_access_key_id', {
+      bucket,
+      endpointAccountId,
+      accessKeyId,
+    })
+    return json(
+      {
+        error:
+          'R2_ACCESS_KEY_ID is not valid. Use the Access Key ID from a Cloudflare R2 API token, not the account ID from the endpoint.',
+      },
+      500,
+    )
+  }
+
   if (req.method === 'GET') {
     const key = new URL(req.url).searchParams.get('key')
     if (!key) return json({ error: 'Missing key.' }, 400)
@@ -172,27 +190,9 @@ Deno.serve(async (req) => {
         Key: key,
         Body: body,
         ContentType: contentType,
-        CacheControl: 'public, max-age=31536000, immutable',
-        Metadata: {
-          original_name: safeFileName,
-          uploaded_by: user.id,
-        },
       }),
     )
-  } catch (error) {
-    log('error', 'file_upload_failed', {
-      userId: user.id,
-      key,
-      bucket,
-      endpoint,
-      contentType,
-      size: body.byteLength,
-      message: error instanceof Error ? error.message : String(error),
-    })
-    return json({ error: error instanceof Error ? error.message : 'Failed to upload file to R2.' }, 500)
-  }
 
-  try {
     const url = await getSignedUrl(
       s3,
       new GetObjectCommand({
@@ -204,11 +204,15 @@ Deno.serve(async (req) => {
 
     return json({ bucket, key, url }, 201)
   } catch (error) {
-    log('error', 'file_sign_after_upload_failed', {
+    log('error', 'file_upload_failed', {
       userId: user.id,
       key,
+      bucket,
+      endpoint,
+      contentType,
+      size: body.byteLength,
       message: error instanceof Error ? error.message : String(error),
     })
-    return json({ error: error instanceof Error ? error.message : 'File uploaded but signing URL failed.' }, 500)
+    return json({ error: error instanceof Error ? error.message : 'Failed to upload file to R2.' }, 500)
   }
 })

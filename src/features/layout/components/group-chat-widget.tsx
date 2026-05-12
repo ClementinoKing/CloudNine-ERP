@@ -118,6 +118,12 @@ type ChatRoomTypingStateRow = {
   updated_at: string
 }
 
+type PresenceSession = {
+  user_id: string
+  is_online: boolean
+  last_seen_at: string | null
+}
+
 type ChatMessageRow = {
   id: string
   room_id: string
@@ -218,6 +224,7 @@ const CHAT_ATTACHMENT_ALLOWED_MIME_TYPES = new Set([
 ])
 const CHAT_CACHE_KEY = 'cloudnine.group-chat.cache.v1'
 const CHAT_CACHE_MAX_AGE_MS = 10 * 60 * 1000
+const CHAT_PRESENCE_WINDOW_MS = 5 * 60 * 1000
 const CHAT_TYPING_STATE_TTL_MS = 12_000
 const CHAT_TYPING_START_DELAY_MS = 350
 const CHAT_TYPING_HEARTBEAT_MS = 5_000
@@ -660,6 +667,14 @@ function getInitialRoomHeader(room: ChatRoomRow | null) {
   }
 }
 
+function isPresenceSessionActive(session: PresenceSession, nowMs: number) {
+  if (!session.is_online) return false
+  if (!session.last_seen_at) return true
+  const lastSeenMs = new Date(session.last_seen_at).getTime()
+  if (Number.isNaN(lastSeenMs)) return false
+  return nowMs - lastSeenMs <= CHAT_PRESENCE_WINDOW_MS
+}
+
 function chatCacheStorageKey(userId: string, roomSlug: string) {
   return `${CHAT_CACHE_KEY}:${userId}:${roomSlug}`
 }
@@ -1099,6 +1114,7 @@ export function GroupChatWidget() {
   const [room, setRoom] = useState<ChatRoomRow | null>(null)
   const [profiles, setProfiles] = useState<ChatProfileRow[]>([])
   const [roomMembers, setRoomMembers] = useState<ChatRoomMemberRow[]>([])
+  const [presenceSessions, setPresenceSessions] = useState<PresenceSession[]>([])
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [typingStates, setTypingStates] = useState<ChatRoomTypingStateRow[]>([])
   const [attachments, setAttachments] = useState<ChatComposerAttachment[]>(EMPTY_COMPOSER_ATTACHMENTS)
@@ -1117,6 +1133,7 @@ export function GroupChatWidget() {
   const [error, setError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [unreadMessageCount, setUnreadMessageCount] = useState(0)
+  const [presenceClockMs, setPresenceClockMs] = useState(() => Date.now())
   const [isRecordingVoice, setIsRecordingVoice] = useState(false)
   const [recordingElapsedMs, setRecordingElapsedMs] = useState(0)
   const [recordingLevels, setRecordingLevels] = useState<number[]>(() => createBaseWaveLevels(20))
@@ -1170,15 +1187,16 @@ export function GroupChatWidget() {
     [editingMessageId, messages],
   )
   const actionSheetMessage = messageActionTarget
-  const roomMemberProfiles = useMemo(
-    () =>
-      roomMembers
-        .map((member) => profileById.get(member.user_id))
-        .filter((profile): profile is ChatProfileRow => Boolean(profile))
-        .filter((profile) => profile.id !== currentUser?.id),
-    [currentUser?.id, profileById, roomMembers],
-  )
-  const onlineUserIds = useMemo(() => new Set(roomMemberProfiles.map((profile) => profile.id)), [roomMemberProfiles])
+  const roomMemberIds = useMemo(() => new Set(roomMembers.map((member) => member.user_id)), [roomMembers])
+  const onlineUserIds = useMemo(() => {
+    const activeUserIds = new Set<string>()
+    for (const session of presenceSessions) {
+      if (roomMemberIds.has(session.user_id) && isPresenceSessionActive(session, presenceClockMs)) {
+        activeUserIds.add(session.user_id)
+      }
+    }
+    return activeUserIds
+  }, [presenceClockMs, presenceSessions, roomMemberIds])
   const typingProfiles = useMemo(() => {
     const typingProfileMap = new Map<string, ChatProfileRow>()
     for (const typingState of typingStates) {
@@ -1543,6 +1561,7 @@ export function GroupChatWidget() {
       setRoom(null)
       setProfiles([])
       setRoomMembers([])
+      setPresenceSessions([])
       setMessages([])
       setLoading(false)
       return
@@ -1554,6 +1573,7 @@ export function GroupChatWidget() {
       setRoom(cachedState.room)
       setProfiles(cachedState.profiles)
       setRoomMembers(cachedState.roomMembers)
+      setPresenceSessions([])
       setMessages(cachedState.messages)
       setError(null)
       setLoading(false)
@@ -1567,7 +1587,7 @@ export function GroupChatWidget() {
       const roomData = await resolveOrganizationRoom()
 
       if (!roomData) {
-        console.error('Failed to load group chat room', null)
+        console.warn('Group chat room is not ready yet.')
         if (!hasCachedState) {
           setRoom(null)
           setProfiles([])
@@ -1624,6 +1644,25 @@ export function GroupChatWidget() {
       const profileRows = (profilesResult.data ?? []) as ChatProfileRow[]
       const memberRows = (membersResult.data ?? []) as ChatRoomMemberRow[]
       const messageRows = (messagesResult.data ?? []) as ChatMessageRow[]
+      const memberUserIds = memberRows.map((member) => member.user_id)
+      let presenceRows: PresenceSession[] = []
+
+      if (memberUserIds.length > 0) {
+        const sinceIso = new Date(Date.now() - CHAT_PRESENCE_WINDOW_MS).toISOString()
+        const presenceResult = await supabase
+          .from('user_presence_sessions')
+          .select('user_id, is_online, last_seen_at')
+          .eq('is_online', true)
+          .gte('last_seen_at', sinceIso)
+          .in('user_id', memberUserIds)
+
+        if (presenceResult.error) {
+          console.error('Failed to load chat presence sessions', presenceResult.error)
+        } else {
+          presenceRows = (presenceResult.data ?? []) as PresenceSession[]
+        }
+      }
+
       const profileMap = new Map(profileRows.map((profile) => [profile.id, profile]))
       const messageIds = messageRows.map((row) => row.id)
 
@@ -1672,6 +1711,7 @@ export function GroupChatWidget() {
 
       setProfiles(profileRows)
       setRoomMembers(memberRows)
+      setPresenceSessions(presenceRows)
       const voiceStorageKeyByMessageId = new Map<string, string>()
       const nextMessages: ChatMessage[] = messageRows.map((row) => {
         const authorProfile = row.author_id ? profileMap.get(row.author_id) ?? null : null
@@ -1788,20 +1828,20 @@ export function GroupChatWidget() {
   }, [currentUser?.id, loadTypingStates, roomCacheSlug, resolveOrganizationRoom])
 
   useEffect(() => {
-    if (!open) return
+    if (!open || !currentUser?.id || !currentOrganizationId || !currentMembership) return
     const timer = window.setTimeout(() => {
       inputRef.current?.focus()
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [open])
+  }, [currentMembership, currentOrganizationId, currentUser?.id, open])
 
   useEffect(() => {
-    if (!open) return
+    if (!open || !currentUser?.id || !currentOrganizationId || !currentMembership) return
     void loadChatData()
-  }, [loadChatData, open])
+  }, [currentMembership, currentOrganizationId, currentUser?.id, loadChatData, open])
 
   useEffect(() => {
-    if (!open || !room?.id) return
+    if (!open || !currentUser?.id || !currentOrganizationId || !currentMembership || !room?.id) return
 
     let cancelled = false
 
@@ -1828,6 +1868,7 @@ export function GroupChatWidget() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages', filter: `room_id=eq.${room.id}` }, scheduleRoomReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_room_members', filter: `room_id=eq.${room.id}` }, scheduleRoomReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_rooms', filter: `id=eq.${room.id}` }, scheduleRoomReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_presence_sessions' }, scheduleRoomReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_message_mentions' }, scheduleRoomReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_message_attachments' }, scheduleRoomReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_room_typing_states', filter: `room_id=eq.${room.id}` }, loadTypingForRoom)
@@ -1841,7 +1882,15 @@ export function GroupChatWidget() {
       }
       void supabase.removeChannel(channel)
     }
-  }, [loadChatData, loadTypingStates, open, room?.id])
+  }, [currentMembership, currentOrganizationId, currentUser?.id, loadChatData, loadTypingStates, open, room?.id])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setPresenceClockMs(Date.now())
+    }, 30_000)
+
+    return () => window.clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     if (!currentUser?.id || !room?.slug || loading) return
@@ -2275,120 +2324,207 @@ export function GroupChatWidget() {
     const previousDraft = draft
 
     setSending(true)
-    void stopTypingPresence()
-    setDraft('')
-    clearComposerAttachments()
-    clearPendingVoiceMessage(false)
-    setMentionDraft(null)
-    setMentionActiveIndex(0)
-    if (optimisticId && optimisticCreatedAt) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: optimisticId,
-          authorId: currentUser.id,
-          author: currentUser.name,
-          authorHandle: currentUser.username,
-          authorAvatarUrl: currentUser.avatarUrl ?? currentUser.avatarPath ?? null,
-          role: currentUser.jobTitle ?? currentUser.roleLabel ?? 'Team',
-          initials: getProfileInitials(currentUser.name),
-          message: trimmed,
-          time: 'Sending…',
-          createdAt: optimisticCreatedAt,
-          replyToId: replyToMessageId,
-          mine: true,
-          pending: true,
-          editedAt: null,
-          deletedAt: null,
-          clientMessageId: optimisticId,
-          voiceDataUrl: optimisticVoice?.voiceDataUrl ?? null,
-          voiceStorageKey: optimisticVoice?.voiceStorageKey ?? null,
-          voiceDurationMs: optimisticVoice?.voiceDurationMs ?? null,
-          attachments: optimisticAttachments,
-        },
-      ])
-    }
-    const mentionsInMessage = extractMentionHandles(trimmed)
-    const mentionedUsers = mentionOptions.filter((option) => mentionsInMessage.includes(getMentionHandle(option)))
-    let uploadedAttachments: Array<{
-      attachment: ChatComposerAttachment
-      upload: { bucket: string; key: string; url: string }
-      uploadFile: File
-    }> = []
-    let uploadedVoice: { bucket: string; key: string; url: string } | null = null
-
-    if (attachmentsSnapshot.length > 0 || voiceSnapshot) {
-      try {
-        ;[uploadedAttachments, uploadedVoice] = await Promise.all([
-          attachmentsSnapshot.length > 0 ? uploadComposerAttachments(attachmentsSnapshot) : Promise.resolve([]),
-          voiceSnapshot ? uploadChatVoiceToR2(voiceSnapshot.file, session?.token) : Promise.resolve(null),
+    try {
+      void stopTypingPresence()
+      setDraft('')
+      clearComposerAttachments()
+      clearPendingVoiceMessage(false)
+      setMentionDraft(null)
+      setMentionActiveIndex(0)
+      if (optimisticId && optimisticCreatedAt) {
+        setMessages((current) => [
+          ...current,
+          {
+            id: optimisticId,
+            authorId: currentUser.id,
+            author: currentUser.name,
+            authorHandle: currentUser.username,
+            authorAvatarUrl: currentUser.avatarUrl ?? currentUser.avatarPath ?? null,
+            role: currentUser.jobTitle ?? currentUser.roleLabel ?? 'Team',
+            initials: getProfileInitials(currentUser.name),
+            message: trimmed,
+            time: 'Sending…',
+            createdAt: optimisticCreatedAt,
+            replyToId: replyToMessageId,
+            mine: true,
+            pending: true,
+            editedAt: null,
+            deletedAt: null,
+            clientMessageId: optimisticId,
+            voiceDataUrl: optimisticVoice?.voiceDataUrl ?? null,
+            voiceStorageKey: optimisticVoice?.voiceStorageKey ?? null,
+            voiceDurationMs: optimisticVoice?.voiceDurationMs ?? null,
+            attachments: optimisticAttachments,
+          },
         ])
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Attachment upload failed.'
-        console.error('Failed to upload chat attachments', error)
-        notify.error('Attachment upload failed', {
-          description: message,
-        })
-        optimisticAttachments.forEach(revokeAttachmentPreviewUrl)
+      }
+      const mentionsInMessage = extractMentionHandles(trimmed)
+      const mentionedUsers = mentionOptions.filter((option) => mentionsInMessage.includes(getMentionHandle(option)))
+      let uploadedAttachments: Array<{
+        attachment: ChatComposerAttachment
+        upload: { bucket: string; key: string; url: string }
+        uploadFile: File
+      }> = []
+      let uploadedVoice: { bucket: string; key: string; url: string } | null = null
+
+      if (attachmentsSnapshot.length > 0 || voiceSnapshot) {
+        try {
+          ;[uploadedAttachments, uploadedVoice] = await Promise.all([
+            attachmentsSnapshot.length > 0 ? uploadComposerAttachments(attachmentsSnapshot) : Promise.resolve([]),
+            voiceSnapshot ? uploadChatVoiceToR2(voiceSnapshot.file, session?.token) : Promise.resolve(null),
+          ])
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Attachment upload failed.'
+          console.error('Failed to upload chat attachments', error)
+          notify.error('Attachment upload failed', {
+            description: message,
+          })
+          optimisticAttachments.forEach(revokeAttachmentPreviewUrl)
+          if (voiceSnapshot) {
+            setPendingVoiceMessage(voiceSnapshot)
+          }
+          if (optimisticId) {
+            setMessages((current) => current.filter((chatMessage) => chatMessage.id !== optimisticId))
+          }
+          setDraft(previousDraft)
+          if (previousDraft.trim().length > 0) {
+            scheduleTypingPresence(previousDraft)
+          }
+          return
+        }
+      }
+
+      const attachmentRows = uploadedAttachments.map(({ attachment, upload, uploadFile }) => ({
+        storage_bucket: upload.bucket,
+        storage_path: upload.key,
+        file_name: attachment.name,
+        mime_type: uploadFile.type || attachment.file.type || null,
+        file_size_bytes: uploadFile.size,
+        attachment_kind: attachment.kind,
+        metadata: {
+          original_name: attachment.file.name,
+          original_size_bytes: attachment.file.size,
+          uploaded_size_bytes: uploadFile.size,
+          optimized: uploadFile !== attachment.file,
+          uploaded_name: uploadFile.name,
+          uploaded_url: upload.url,
+          public_url: upload.url,
+        },
+      }))
+      const voiceMetadata = uploadedVoice
+        ? {
+            voice_data_url: uploadedVoice.url,
+            voice_storage_key: uploadedVoice.key,
+            voice_duration_ms: voiceSnapshot?.durationMs ?? null,
+          }
+        : null
+
+      if (editingMessageId) {
+        const { error: updateError } = await supabase
+          .from('chat_messages')
+          .update({
+            body: trimmed,
+            edited_at: new Date().toISOString(),
+            metadata: {
+              mention_handles: mentionsInMessage,
+              ...(voiceMetadata ?? {}),
+            },
+          })
+          .eq('id', editingMessageId)
+          .eq('author_id', currentUser.id)
+
+        if (updateError) {
+          console.error('Failed to update chat message', updateError)
+          notify.error('Message update failed', {
+            description: 'Your message could not be updated right now.',
+          })
+          optimisticAttachments.forEach(revokeAttachmentPreviewUrl)
+          if (voiceSnapshot) {
+            setPendingVoiceMessage(voiceSnapshot)
+          }
+          setDraft(previousDraft)
+          if (previousDraft.trim().length > 0) {
+            scheduleTypingPresence(previousDraft)
+          }
+          if (optimisticId) {
+            setMessages((current) => current.filter((chatMessage) => chatMessage.id !== optimisticId))
+          }
+          return
+        }
+
+        const { data: existingMentionRows, error: existingMentionError } = await supabase
+          .from('chat_message_mentions')
+          .select('mentioned_user_id')
+          .eq('message_id', editingMessageId)
+
+        if (existingMentionError) {
+          console.error('Failed to load existing chat mentions before edit', existingMentionError)
+        }
+
+        const previousMentionIds = new Set((existingMentionRows ?? []).map((row) => row.mentioned_user_id))
+        const nextMentionIds = new Set(mentionedUsers.map((user) => user.id))
+        const addedMentionIds = Array.from(nextMentionIds).filter((userId) => !previousMentionIds.has(userId))
+
+        const { error: clearMentionsError } = await supabase.from('chat_message_mentions').delete().eq('message_id', editingMessageId)
+        if (clearMentionsError) {
+          console.error('Failed to clear chat mentions before edit', clearMentionsError)
+        } else if (mentionedUsers.length > 0) {
+          const mentionRows = mentionedUsers.map((user) => ({
+            message_id: editingMessageId,
+            mentioned_user_id: user.id,
+          }))
+          const { error: mentionInsertError } = await supabase.from('chat_message_mentions').insert(mentionRows)
+          if (mentionInsertError) {
+            console.error('Failed to update chat mentions', mentionInsertError)
+          } else if (addedMentionIds.length > 0) {
+            void dispatchChatMentionEmails(editingMessageId, addedMentionIds, trimmed)
+          }
+        }
+
+        if (attachmentRows.length > 0) {
+          const { error: attachmentInsertError } = await supabase.from('chat_message_attachments').insert(
+            attachmentRows.map((row) => ({
+              ...row,
+              message_id: editingMessageId,
+            })),
+          )
+
+          if (attachmentInsertError) {
+            console.error('Failed to insert chat attachments', attachmentInsertError)
+            notify.error('Attachments could not be saved', {
+              description: 'The files were uploaded, but we could not attach them to the message.',
+            })
+          }
+        }
+
+        setDraft('')
+        clearComposerAttachments()
+        cancelEditing()
         if (voiceSnapshot) {
-          setPendingVoiceMessage(voiceSnapshot)
+          URL.revokeObjectURL(voiceSnapshot.previewUrl)
         }
-        if (optimisticId) {
-          setMessages((current) => current.filter((chatMessage) => chatMessage.id !== optimisticId))
-        }
-        setDraft(previousDraft)
-        if (previousDraft.trim().length > 0) {
-          scheduleTypingPresence(previousDraft)
-        }
-        setSending(false)
+        void loadChatData({ background: true })
         return
       }
-    }
 
-    const attachmentRows = uploadedAttachments.map(({ attachment, upload, uploadFile }) => ({
-      storage_bucket: upload.bucket,
-      storage_path: upload.key,
-      file_name: attachment.name,
-      mime_type: uploadFile.type || attachment.file.type || null,
-      file_size_bytes: uploadFile.size,
-      attachment_kind: attachment.kind,
-      metadata: {
-        original_name: attachment.file.name,
-        original_size_bytes: attachment.file.size,
-        uploaded_size_bytes: uploadFile.size,
-        optimized: uploadFile !== attachment.file,
-        uploaded_name: uploadFile.name,
-        uploaded_url: upload.url,
-        public_url: upload.url,
-      },
-    }))
-    const voiceMetadata = uploadedVoice
-      ? {
-          voice_data_url: uploadedVoice.url,
-          voice_storage_key: uploadedVoice.key,
-          voice_duration_ms: voiceSnapshot?.durationMs ?? null,
-        }
-      : null
-
-    if (editingMessageId) {
-      const { error: updateError } = await supabase
+      const { data: insertedMessage, error: insertError } = await supabase
         .from('chat_messages')
-        .update({
+        .insert({
+          room_id: room.id,
+          author_id: currentUser.id,
           body: trimmed,
-          edited_at: new Date().toISOString(),
+          reply_to_id: replyToMessageId,
           metadata: {
             mention_handles: mentionsInMessage,
+            client_message_id: optimisticId,
             ...(voiceMetadata ?? {}),
           },
         })
-        .eq('id', editingMessageId)
-        .eq('author_id', currentUser.id)
+        .select('id, created_at')
+        .single()
 
-      if (updateError) {
-        console.error('Failed to update chat message', updateError)
-        notify.error('Message update failed', {
-          description: 'Your message could not be updated right now.',
-        })
+      if (insertError || !insertedMessage) {
+        console.error('Failed to create chat message', insertError)
         optimisticAttachments.forEach(revokeAttachmentPreviewUrl)
         if (voiceSnapshot) {
           setPendingVoiceMessage(voiceSnapshot)
@@ -2400,44 +2536,57 @@ export function GroupChatWidget() {
         if (optimisticId) {
           setMessages((current) => current.filter((chatMessage) => chatMessage.id !== optimisticId))
         }
-        setSending(false)
         return
       }
 
-      const { data: existingMentionRows, error: existingMentionError } = await supabase
-        .from('chat_message_mentions')
-        .select('mentioned_user_id')
-        .eq('message_id', editingMessageId)
-
-      if (existingMentionError) {
-        console.error('Failed to load existing chat mentions before edit', existingMentionError)
-      }
-
-      const previousMentionIds = new Set((existingMentionRows ?? []).map((row) => row.mentioned_user_id))
-      const nextMentionIds = new Set(mentionedUsers.map((user) => user.id))
-      const addedMentionIds = Array.from(nextMentionIds).filter((userId) => !previousMentionIds.has(userId))
-
-      const { error: clearMentionsError } = await supabase.from('chat_message_mentions').delete().eq('message_id', editingMessageId)
-      if (clearMentionsError) {
-        console.error('Failed to clear chat mentions before edit', clearMentionsError)
-      } else if (mentionedUsers.length > 0) {
+      if (mentionedUsers.length > 0) {
         const mentionRows = mentionedUsers.map((user) => ({
-          message_id: editingMessageId,
+          message_id: insertedMessage.id,
           mentioned_user_id: user.id,
         }))
         const { error: mentionInsertError } = await supabase.from('chat_message_mentions').insert(mentionRows)
         if (mentionInsertError) {
-          console.error('Failed to update chat mentions', mentionInsertError)
-        } else if (addedMentionIds.length > 0) {
-          void dispatchChatMentionEmails(editingMessageId, addedMentionIds, trimmed)
+          console.error('Failed to create chat mentions', mentionInsertError)
+        } else {
+          void dispatchChatMentionEmails(insertedMessage.id, mentionedUsers.map((user) => user.id), trimmed)
         }
       }
+
+      const confirmedAttachments = uploadedAttachments.map(({ attachment, upload, uploadFile }) => ({
+        id: `${insertedMessage.id}-${attachment.id}`,
+        message_id: insertedMessage.id,
+        storage_bucket: upload.bucket,
+        storage_path: upload.key,
+        file_name: attachment.name,
+        mime_type: uploadFile.type || attachment.file.type || null,
+        file_size_bytes: uploadFile.size,
+        attachment_kind: attachment.kind,
+        metadata: {
+          original_name: attachment.file.name,
+          original_size_bytes: attachment.file.size,
+          uploaded_size_bytes: uploadFile.size,
+          optimized: uploadFile !== attachment.file,
+          uploaded_name: uploadFile.name,
+          uploaded_url: upload.url,
+          public_url: upload.url,
+        },
+        created_at: insertedMessage.created_at,
+        publicUrl: upload.url,
+        displaySize: displayAttachmentSize(uploadFile.size),
+      }))
+      const confirmedVoice = uploadedVoice
+        ? {
+            voiceDataUrl: uploadedVoice.url,
+            voiceStorageKey: uploadedVoice.key,
+            voiceDurationMs: voiceSnapshot?.durationMs ?? null,
+          }
+        : null
 
       if (attachmentRows.length > 0) {
         const { error: attachmentInsertError } = await supabase.from('chat_message_attachments').insert(
           attachmentRows.map((row) => ({
             ...row,
-            message_id: editingMessageId,
+            message_id: insertedMessage.id,
           })),
         )
 
@@ -2449,35 +2598,38 @@ export function GroupChatWidget() {
         }
       }
 
-      setDraft('')
-      clearComposerAttachments()
-      cancelEditing()
+      setMessages((current) =>
+        optimisticId
+          ? current.map((chatMessage) =>
+              chatMessage.id === optimisticId
+                ? {
+                    ...chatMessage,
+                    id: insertedMessage.id,
+                    time: formatMessageTimestampLabel(insertedMessage.created_at),
+                    createdAt: insertedMessage.created_at,
+                    pending: false,
+                    clientMessageId: optimisticId,
+                    replyToId: replyToMessageId,
+                    voiceDataUrl: confirmedVoice?.voiceDataUrl ?? null,
+                    voiceStorageKey: confirmedVoice?.voiceStorageKey ?? null,
+                    voiceDurationMs: confirmedVoice?.voiceDurationMs ?? null,
+                    attachments: confirmedAttachments,
+                  }
+                : chatMessage,
+            )
+          : current,
+      )
+      optimisticAttachments.forEach(revokeAttachmentPreviewUrl)
       if (voiceSnapshot) {
         URL.revokeObjectURL(voiceSnapshot.previewUrl)
       }
-      setSending(false)
+      setReplyToMessageId(null)
       void loadChatData({ background: true })
-      return
-    }
-
-    const { data: insertedMessage, error: insertError } = await supabase
-      .from('chat_messages')
-      .insert({
-        room_id: room.id,
-        author_id: currentUser.id,
-        body: trimmed,
-        reply_to_id: replyToMessageId,
-        metadata: {
-          mention_handles: mentionsInMessage,
-          client_message_id: optimisticId,
-          ...(voiceMetadata ?? {}),
-        },
+    } catch (error) {
+      console.error('Failed to send chat message', error)
+      notify.error('Message send failed', {
+        description: error instanceof Error ? error.message : 'Your message could not be sent right now.',
       })
-      .select('id, created_at')
-      .single()
-
-    if (insertError || !insertedMessage) {
-      console.error('Failed to create chat message', insertError)
       optimisticAttachments.forEach(revokeAttachmentPreviewUrl)
       if (voiceSnapshot) {
         setPendingVoiceMessage(voiceSnapshot)
@@ -2489,97 +2641,9 @@ export function GroupChatWidget() {
       if (optimisticId) {
         setMessages((current) => current.filter((chatMessage) => chatMessage.id !== optimisticId))
       }
+    } finally {
       setSending(false)
-      return
     }
-
-    if (mentionedUsers.length > 0) {
-      const mentionRows = mentionedUsers.map((user) => ({
-        message_id: insertedMessage.id,
-        mentioned_user_id: user.id,
-      }))
-      const { error: mentionInsertError } = await supabase.from('chat_message_mentions').insert(mentionRows)
-      if (mentionInsertError) {
-        console.error('Failed to create chat mentions', mentionInsertError)
-      } else {
-        void dispatchChatMentionEmails(insertedMessage.id, mentionedUsers.map((user) => user.id), trimmed)
-      }
-    }
-
-    const confirmedAttachments = uploadedAttachments.map(({ attachment, upload, uploadFile }) => ({
-      id: `${insertedMessage.id}-${attachment.id}`,
-      message_id: insertedMessage.id,
-      storage_bucket: upload.bucket,
-      storage_path: upload.key,
-      file_name: attachment.name,
-      mime_type: uploadFile.type || attachment.file.type || null,
-      file_size_bytes: uploadFile.size,
-      attachment_kind: attachment.kind,
-      metadata: {
-        original_name: attachment.file.name,
-        original_size_bytes: attachment.file.size,
-        uploaded_size_bytes: uploadFile.size,
-        optimized: uploadFile !== attachment.file,
-        uploaded_name: uploadFile.name,
-        uploaded_url: upload.url,
-        public_url: upload.url,
-      },
-      created_at: insertedMessage.created_at,
-      publicUrl: upload.url,
-      displaySize: displayAttachmentSize(uploadFile.size),
-    }))
-    const confirmedVoice = uploadedVoice
-      ? {
-          voiceDataUrl: uploadedVoice.url,
-          voiceStorageKey: uploadedVoice.key,
-          voiceDurationMs: voiceSnapshot?.durationMs ?? null,
-        }
-      : null
-
-    if (attachmentRows.length > 0) {
-      const { error: attachmentInsertError } = await supabase.from('chat_message_attachments').insert(
-        attachmentRows.map((row) => ({
-          ...row,
-          message_id: insertedMessage.id,
-        })),
-      )
-
-      if (attachmentInsertError) {
-        console.error('Failed to insert chat attachments', attachmentInsertError)
-        notify.error('Attachments could not be saved', {
-          description: 'The files were uploaded, but we could not attach them to the message.',
-        })
-      }
-    }
-
-    setMessages((current) =>
-      optimisticId
-        ? current.map((chatMessage) =>
-            chatMessage.id === optimisticId
-              ? {
-                  ...chatMessage,
-                  id: insertedMessage.id,
-                  time: formatMessageTimestampLabel(insertedMessage.created_at),
-                  createdAt: insertedMessage.created_at,
-                  pending: false,
-                  clientMessageId: optimisticId,
-                  replyToId: replyToMessageId,
-                  voiceDataUrl: confirmedVoice?.voiceDataUrl ?? null,
-                  voiceStorageKey: confirmedVoice?.voiceStorageKey ?? null,
-                  voiceDurationMs: confirmedVoice?.voiceDurationMs ?? null,
-                  attachments: confirmedAttachments,
-                }
-              : chatMessage,
-          )
-        : current,
-    )
-    optimisticAttachments.forEach(revokeAttachmentPreviewUrl)
-    if (voiceSnapshot) {
-      URL.revokeObjectURL(voiceSnapshot.previewUrl)
-    }
-    setReplyToMessageId(null)
-    setSending(false)
-    void loadChatData({ background: true })
   }, [
     attachments,
     cancelEditing,
