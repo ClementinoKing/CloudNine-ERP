@@ -16,6 +16,7 @@ const REALTIME_TABLES = [
   'goal_checkins',
   'goal_links',
   'organization_timeline_events',
+  'organizations',
   'user_presence_sessions',
 ] as const
 

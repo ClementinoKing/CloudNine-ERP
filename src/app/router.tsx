@@ -22,6 +22,7 @@ import { OnboardingOrganizationPage } from '@/features/onboarding/pages/onboardi
 import { OnboardingWorkPage } from '@/features/onboarding/pages/onboarding-work-page'
 import { OnboardingToolsPage } from '@/features/onboarding/pages/onboarding-tools-page'
 import { NotFoundPage } from '@/features/errors/pages/not-found-page'
+import { OrgChartPage } from '@/features/workforce/pages/org-chart-page'
 
 const LAST_DASHBOARD_PATH_KEY = 'cloudnine.last-dashboard-path'
 
@@ -70,6 +71,7 @@ export const router = createBrowserRouter([
           { path: 'documents', element: <DocumentsPage /> },
           { path: 'tools', element: <ToolsPage /> },
           { path: 'workspace', element: <WorkspacePage /> },
+          { path: 'workspace/org-chart', element: <OrgChartPage /> },
           { path: 'settings', element: <SettingsPage /> },
         ],
       },

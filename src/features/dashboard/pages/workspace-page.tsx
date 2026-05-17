@@ -32,8 +32,10 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useAuth } from '@/features/auth/context/auth-context'
 import { notify } from '@/lib/notify'
 import { supabase } from '@/lib/supabase'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { OrganizationBrandingForm } from '@/features/organization/components/organization-branding-form'
 import { useOrganization } from '@/features/organization/context/organization-context'
+import { OrganizationSettingsForm } from '@/features/organization/components/organization-settings-form'
 
 const WORKSPACE_MEMBERS_CACHE_KEY = 'cloudnine.workspace.members.v1'
 const WORKSPACE_PRESENCE_CACHE_KEY = 'cloudnine.workspace.presence.v1'
@@ -131,6 +133,7 @@ type MemberAccountAction = 'deactivate' | 'delete' | 'reactivate'
 type WorkspaceSectionKey =
   | 'overview'
   | 'organization-settings'
+  | 'organization-branding'
   | 'departments'
   | 'jobs'
   | 'roles-permissions'
@@ -192,6 +195,7 @@ const MEMBER_ROLE_LABELS = [
 const V1_LIVE_SECTIONS = new Set<WorkspaceSectionKey>([
   'overview',
   'organization-settings',
+  'organization-branding',
   'departments',
   'jobs',
   'roles-permissions',
@@ -213,6 +217,7 @@ const WORKSPACE_SECTION_GROUPS: WorkspaceSectionGroup[] = [
     icon: Building2,
     items: [
       { key: 'organization-settings', label: 'Organization Settings', description: 'Identity and structure settings.', icon: Building2 },
+      { key: 'organization-branding', label: 'Organization Branding', description: 'Logo and theme colors.', icon: Sparkles },
       { key: 'branches', label: 'Branches', description: 'Branch and location setup.', icon: MapPin, comingSoon: true },
       { key: 'business-units', label: 'Business Units', description: 'Unit-level operational grouping.', icon: Workflow, comingSoon: true },
     ],
@@ -224,7 +229,7 @@ const WORKSPACE_SECTION_GROUPS: WorkspaceSectionGroup[] = [
       { key: 'departments', label: 'Departments', description: 'Department structure and occupancy.', icon: Users2 },
       { key: 'jobs', label: 'Jobs', description: 'Roles and job-position mapping.', icon: UserCog },
       { key: 'employee-directory', label: 'Employee Directory', description: 'Full organization people directory.', icon: Users2, comingSoon: true },
-      { key: 'org-chart', label: 'Org Chart', description: 'Visual reporting hierarchy.', icon: Workflow, comingSoon: true },
+      { key: 'org-chart', label: 'Org Chart', description: 'Visual reporting hierarchy.', icon: Workflow },
     ],
   },
   {
@@ -1117,6 +1122,7 @@ function MemberDetailsDialog({
 }
 
 export function WorkspacePage() {
+  const navigate = useNavigate()
   const { currentOrganization } = useOrganization()
   const [initialWorkspaceCache] = useState(() => readWorkspaceCacheSnapshot())
   const { currentUser, updateCurrentUser, logout } = useAuth()
@@ -1697,6 +1703,12 @@ export function WorkspacePage() {
   }
 
   const setSection = (section: WorkspaceSectionKey) => {
+    // Navigate to dedicated page for org-chart
+    if (section === 'org-chart') {
+      navigate('/dashboard/workspace/org-chart')
+      return
+    }
+
     const next = new URLSearchParams(searchParams)
     next.set('section', section)
     setSearchParams(next, { replace: true })
@@ -1862,17 +1874,8 @@ export function WorkspacePage() {
           </>
         ) : null}
 
-        {activeSection === 'organization-settings' ? (
-          <Card>
-            <CardHeader><CardTitle>Organization Settings</CardTitle></CardHeader>
-            <CardContent className='grid gap-4 md:grid-cols-2'>
-              <div className='rounded-md border bg-muted/10 p-3'><p className='text-xs text-muted-foreground'>Organization Name</p><p className='mt-1 text-sm font-medium'>{currentOrganization.name}</p></div>
-              <div className='rounded-md border bg-muted/10 p-3'><p className='text-xs text-muted-foreground'>Plan</p><p className='mt-1 text-sm font-medium'>{currentOrganization.plan}</p></div>
-              <div className='rounded-md border bg-muted/10 p-3'><p className='text-xs text-muted-foreground'>Industry</p><p className='mt-1 text-sm font-medium'>{currentOrganization.industry || 'Not set'}</p></div>
-              <div className='rounded-md border bg-muted/10 p-3'><p className='text-xs text-muted-foreground'>Location</p><p className='mt-1 text-sm font-medium'>{currentOrganization.location || 'Not set'}</p></div>
-            </CardContent>
-          </Card>
-        ) : null}
+        {activeSection === 'organization-settings' ? <OrganizationSettingsForm /> : null}
+        {activeSection === 'organization-branding' ? <OrganizationBrandingForm /> : null}
 
         {activeSection === 'departments' ? (
           <Card>

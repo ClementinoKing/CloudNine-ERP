@@ -1,4 +1,4 @@
-import { FileText, FolderKanban, Grip, LogOut, Moon, Settings, Sun } from 'lucide-react'
+import { Building2, FileText, FolderKanban, Grip, LogOut, Moon, Settings, Sun } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 
@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useAuth } from '@/features/auth/context/auth-context'
+import { useOrganization } from '@/features/organization/context/organization-context'
 import { useUnreadNotifications } from '@/features/layout/hooks/use-unread-notifications'
 import { cn } from '@/lib/utils'
 import { SIDEBAR_SECTIONS } from './navigation-items'
@@ -17,6 +18,7 @@ const THEME_TRANSITION_CLASS = 'theme-transition'
 function SidebarContent({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
   const navigate = useNavigate()
   const { currentUser, logout } = useAuth()
+  const { currentOrganization } = useOrganization()
   const { unreadCount } = useUnreadNotifications()
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const storedTheme = localStorage.getItem(THEME_STORAGE_KEY)
@@ -56,9 +58,21 @@ function SidebarContent({ collapsed, onNavigate }: { collapsed: boolean; onNavig
     <>
       <div className='flex h-full flex-col'>
         <div className='px-3 py-4'>
-          <p className={cn('px-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground', collapsed && 'sr-only')}>
-            Workspace
-          </p>
+          <div className={cn('flex items-center gap-3 rounded-2xl border bg-card px-3 py-3 shadow-[var(--elevation-sm)]', collapsed && 'justify-center px-2')}>
+            {currentOrganization.brandingLogoUrl ? (
+              <div className='flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border bg-background'>
+                <img src={currentOrganization.brandingLogoUrl} alt={`${currentOrganization.name} logo`} className='h-full w-full object-contain p-1.5' />
+              </div>
+            ) : (
+              <div className='flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border bg-primary/10 text-primary'>
+                <Building2 className='h-5 w-5' aria-hidden='true' />
+              </div>
+            )}
+            <div className={cn('min-w-0', collapsed && 'sr-only')}>
+              <p className='truncate text-sm font-semibold text-foreground'>{currentOrganization.name}</p>
+              <p className='truncate text-xs text-muted-foreground'>Organization settings</p>
+            </div>
+          </div>
         </div>
 
         <nav className='flex-1 space-y-4 overflow-y-auto px-2 pb-3'>

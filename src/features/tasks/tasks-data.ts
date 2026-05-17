@@ -7,6 +7,7 @@ export type TaskRow = {
   owner: string
   assigneeIds: string[]
   due: string
+  dueAt?: string | null
   completed?: boolean
   status: string
   statusId?: string

@@ -28,6 +28,8 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useAuth } from '@/features/auth/context/auth-context'
+import { OrganizationBrandingForm } from '@/features/organization/components/organization-branding-form'
+import { OrganizationSettingsForm } from '@/features/organization/components/organization-settings-form'
 import { useOrganization } from '@/features/organization/context/organization-context'
 import { invokeAdminInvite } from '@/features/organization/lib/invitations'
 import { uploadAvatarToR2 } from '@/lib/r2'
@@ -1453,51 +1455,8 @@ export function SettingsPage({ profileOnly = false }: { profileOnly?: boolean })
               <SectionHeader icon={Building2} title='Organization' description='Manage your organization profile and operating details.' />
             </CardHeader>
             <CardContent className='space-y-4'>
-              <div className='grid gap-4 md:grid-cols-2'>
-                <div className='space-y-2'>
-                  <label className='text-sm font-medium text-foreground'>Organization Name</label>
-                  <Input defaultValue={currentOrganization.name} />
-                </div>
-                <div className='space-y-2'>
-                  <label className='text-sm font-medium text-foreground'>Plan</label>
-                  <Input defaultValue={currentOrganization.plan} readOnly />
-                </div>
-                <div className='space-y-2'>
-                  <label className='text-sm font-medium text-foreground'>Legal Name</label>
-                  <Input defaultValue={currentOrganization.legalName} />
-                </div>
-                <div className='space-y-2'>
-                  <label className='text-sm font-medium text-foreground'>Website</label>
-                  <Input defaultValue={currentOrganization.website} />
-                </div>
-                <div className='space-y-2'>
-                  <label className='text-sm font-medium text-foreground'>Industry</label>
-                  <Input defaultValue={currentOrganization.industry} />
-                </div>
-                <div className='space-y-2'>
-                  <label className='text-sm font-medium text-foreground'>Company Size</label>
-                  <Input defaultValue={currentOrganization.size} />
-                </div>
-                <div className='space-y-2'>
-                  <label className='text-sm font-medium text-foreground'>Timezone</label>
-                  <Input defaultValue={currentOrganization.timezone} />
-                </div>
-                <div className='space-y-2'>
-                  <label className='text-sm font-medium text-foreground'>Location</label>
-                  <Input defaultValue={currentOrganization.location} />
-                </div>
-                <div className='space-y-2 md:col-span-2'>
-                  <label className='text-sm font-medium text-foreground'>Organization Details</label>
-                  <textarea
-                    defaultValue={currentOrganization.description}
-                    rows={4}
-                    className='flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
-                  />
-                </div>
-              </div>
-              <div className='flex justify-end'>
-                <Button variant='outline'>Update organization</Button>
-              </div>
+              <OrganizationSettingsForm />
+              <OrganizationBrandingForm />
               {isAdmin ? renderAdminInviteForm() : null}
             </CardContent>
           </>

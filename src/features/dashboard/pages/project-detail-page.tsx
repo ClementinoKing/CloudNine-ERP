@@ -578,6 +578,7 @@ export function ProjectDetailPage() {
         return [optimisticTask, ...current]
       })
       updateBackgroundSyncState('syncing')
+      window.dispatchEvent(new CustomEvent('cloudnine:realtime-change', { detail: { table: 'tasks', action: 'INSERT', rowId: created.id } }))
       void loadProject({ silent: true })
     },
     [loadProject, projectId, statusDefinitions, updateBackgroundSyncState],

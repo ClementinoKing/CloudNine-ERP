@@ -801,6 +801,7 @@ export function UniversalTaskDetailsModal() {
     setTask(next)
     setAssigneeIds(nextAssigneeIds)
     setSaveState('saved')
+    window.dispatchEvent(new CustomEvent('cloudnine:realtime-change', { detail: { table: 'tasks', action: 'UPDATE', rowId: taskId } }))
     saveStateResetTimerRef.current = window.setTimeout(() => {
       setSaveState('idle')
       saveStateResetTimerRef.current = null

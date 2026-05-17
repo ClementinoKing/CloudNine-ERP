@@ -659,6 +659,15 @@ function formatTaskDueLabel(value?: string | null) {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(parsed)
 }
 
+function isTaskOverdue(dueAt?: string | null, completed?: boolean) {
+  if (!dueAt || completed) return false
+  const parsed = new Date(dueAt)
+  if (Number.isNaN(parsed.getTime())) return false
+  const today = startOfDay(new Date())
+  const dueDate = startOfDay(parsed)
+  return dueDate < today
+}
+
 function mapTaskStatus(value?: string | null): TaskRow['status'] {
   return statusLabelFromKey(value)
 }
@@ -1534,6 +1543,7 @@ export function MyTasksPage() {
           owner: assigneeNames.length > 0 ? assigneeNames.join(', ') : 'Unassigned',
           assigneeIds,
           due: formatTaskDueLabel(task.due_at),
+          dueAt: task.due_at,
           completed: Boolean(task.completed_at),
           status: taskStatus?.label ?? mapTaskStatus(statusKey),
           statusId: task.status_id ?? taskStatus?.id ?? undefined,
@@ -1937,6 +1947,7 @@ export function MyTasksPage() {
           owner: task.assigneeName,
           assigneeIds: task.assigneeIds,
           due: formatTaskDueLabel(task.dueAt),
+          dueAt: task.dueAt,
           completed: false,
           status: mapTaskStatus(task.statusKey ?? task.status),
           statusId: task.statusId ?? undefined,
@@ -1951,6 +1962,12 @@ export function MyTasksPage() {
         ...rows,
       ]),
     )
+    
+    // Trigger a background refresh to ensure we have the latest data
+    // Use setTimeout to ensure the state update completes first
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('cloudnine:realtime-change', { detail: { table: 'tasks', action: 'INSERT', rowId: task.id } }))
+    }, 100)
   }
 
   const moveCalendar = (direction: 'prev' | 'next') => {
@@ -2105,6 +2122,7 @@ export function MyTasksPage() {
       return
     }
     setBackgroundSync('saved')
+    window.dispatchEvent(new CustomEvent('cloudnine:realtime-change', { detail: { table: 'tasks', action: 'UPDATE' } }))
     clearSelection()
   }
 
@@ -2243,6 +2261,7 @@ export function MyTasksPage() {
     }
 
     setBackgroundSync('saved')
+    window.dispatchEvent(new CustomEvent('cloudnine:realtime-change', { detail: { table: 'tasks', action: 'UPDATE' } }))
     clearSelection()
   }
 
@@ -2368,6 +2387,7 @@ export function MyTasksPage() {
       return
     }
     setBackgroundSync('saved')
+    window.dispatchEvent(new CustomEvent('cloudnine:realtime-change', { detail: { table: 'tasks', action: 'UPDATE', rowId: taskId } }))
   }
 
   useEffect(() => {
@@ -2520,6 +2540,7 @@ export function MyTasksPage() {
       return
     }
     setStatusCatalog((current) => current.filter((status) => status.id !== columnId))
+    window.dispatchEvent(new CustomEvent('cloudnine:realtime-change', { detail: { table: 'tasks', action: 'UPDATE' } }))
   }
 
   const toggleBoardTaskCompleted = async (taskId: string) => {
@@ -2571,6 +2592,7 @@ export function MyTasksPage() {
       return
     }
     setBackgroundSync('saved')
+    window.dispatchEvent(new CustomEvent('cloudnine:realtime-change', { detail: { table: 'tasks', action: 'UPDATE', rowId: taskId } }))
   }
 
   const resetTaskDraft = () => ({
@@ -2642,6 +2664,7 @@ export function MyTasksPage() {
               projectId: draft.projectId,
               projectName: nextProject?.name ?? 'Unassigned project',
               due: formatTaskDueLabel(dueAtIso),
+              dueAt: dueAtIso,
               owner: nextAssignee,
               assigneeIds: nextAssigneeIds,
               status: effectiveStatusLabel,
@@ -2768,6 +2791,7 @@ export function MyTasksPage() {
     }
 
     setBackgroundSync('saved')
+    window.dispatchEvent(new CustomEvent('cloudnine:realtime-change', { detail: { table: 'tasks', action: 'UPDATE', rowId: taskId } }))
     return { ok: true as const, nextBoardColumn }
   }
 
@@ -4369,7 +4393,17 @@ export function MyTasksPage() {
                                         <span className='text-sm text-muted-foreground'>-</span>
                                       )}
                                     </td>
-                                    <td className='px-3 py-2.5 whitespace-nowrap'>{rowTask.due}</td>
+                                    <td className='px-3 py-2.5 whitespace-nowrap'>
+                                      <Badge 
+                                        variant='outline' 
+                                        className={cn(
+                                          'whitespace-nowrap',
+                                          isTaskOverdue(rowTask.dueAt, rowTask.completed) && 'border-rose-500/40 bg-rose-500/15 text-rose-300'
+                                        )}
+                                      >
+                                        {rowTask.due}
+                                      </Badge>
+                                    </td>
                                     <td className='px-3 py-2.5'>
                                       <Badge variant='outline' className={cn('whitespace-nowrap', priorityBadgeTone(rowTask.priority))}>
                                         {rowTask.priority}
